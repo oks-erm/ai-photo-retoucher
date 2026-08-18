@@ -73,6 +73,13 @@ local function analyse_api(preview, context)
   if os.execute(command) ~= true then remove_file(output); return nil end
   local body = read_file(output); remove_file(output); return body
 end
+local function latest_plan_api()
+  local output = os.tmpname()
+  local command = "curl --fail --silent --show-error -o " .. quote(output)
+    .. " " .. quote(API .. "/v1/plans/latest")
+  if os.execute(command) ~= true then remove_file(output); return nil end
+  local body = read_file(output); remove_file(output); return body
+end
 local function apply_api(image, plan)
   local payload_path, response_path = os.tmpname(), os.tmpname()
   local payload = io.open(payload_path, "w"); if not payload then return nil end
@@ -217,6 +224,24 @@ local apply_reviewed_button = dt.new_widget("button") {
     summary.label = ok and "Applied" or "Apply failed: " .. message
   end,
 }
+local apply_saved_button = dt.new_widget("button") {
+  label = "Apply saved plan (free)",
+  clicked_callback = function()
+    if applied_state then dt.print_error("Revert the active retouch before replaying"); return end
+    if not in_darkroom() then dt.print_error("Open one image in Darkroom"); return end
+    if not api_available() then dt.print_error("Backend is not running"); return end
+    local image = selected_image(); if not image then return end
+    summary.label = "Loading saved plan…"
+    local plan = latest_plan_api()
+    if not plan then summary.label = "No saved plan found"; return end
+    summary.label = "Rendering baseline preview…"
+    local preview, err = render_preview(image)
+    if not preview then summary.label = err; return end
+    last_plan = plan
+    local ok, message = apply_reviewed(image, preview, plan)
+    summary.label = ok and "Saved plan applied (no OpenAI call)" or "Apply failed: " .. message
+  end,
+}
 local refine = dt.new_widget("button") {
   label = "Refine once",
   clicked_callback = function()
@@ -249,4 +274,4 @@ dt.register_lib("ai_retoucher", "AI Retoucher", true, false,
   { [dt.gui.views.darkroom] = { "DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100 } },
   dt.new_widget("box") { orientation="vertical", mode, intent, strength, naturalness,
     protect_skin, protect_highlights, preserve_shadows, preserve_colours, review_first,
-    analyse_apply, apply_reviewed_button, refine, revert, summary }, nil, nil)
+    analyse_apply, apply_reviewed_button, apply_saved_button, refine, revert, summary }, nil, nil)
