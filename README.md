@@ -1,77 +1,83 @@
 # Darktable AI Retoucher
 
-A one-click, vision-guided retouching panel for Darktable 5.6+. It renders a temporary reduced preview locally, asks an OpenAI vision model for a strictly validated edit plan, and applies allow-listed controls to the open Darkroom image. RAW files never leave the Mac.
+Describe the finish you want in Darktable and get a full-resolution, masked, 16-bit TIFF retouch beside the original RAW. OpenAI turns a private 2048 px preview and your intent into a bounded edit plan; all final pixel processing and masks run locally on the Mac.
 
-## macOS: install once
+The result is a new TIFF imported into Darktable. The RAW and its existing history remain untouched, and the TIFF can be developed further with normal Darktable modules. Six full-resolution 16-bit masks are saved beside it for subject, background, skin, face, foliage, and sky.
 
-Requirements: macOS, Darktable in `/Applications`, [uv](https://docs.astral.sh/uv/), and an OpenAI API key. No separate architecture or local AI model is required; Apple Silicon and Intel Macs use the same setup.
+## Install on macOS
+
+Requirements: Darktable 5.6+ in `/Applications`, [uv](https://docs.astral.sh/uv/), about 500 MB of free space for dependencies/model, and an OpenAI API key.
 
 ```bash
 git clone https://github.com/oks-erm/ai-photo-retoucher.git
 cd ai-photo-retoucher
+git switch agent/implement-darktable-ai-retoucher
 cp .env.example .env
-# Open .env and set OPENAI_API_KEY
+# Edit .env and set OPENAI_API_KEY
 bash scripts/install_macos.sh
 ```
 
-Restart Darktable after the installer finishes. The installer copies the Lua panel and registers a macOS LaunchAgent, so the local API starts automatically at login and restarts if it exits. You do not need to run `uv run ai-retoucher` manually afterward.
+The installer uses Python 3.12, downloads the Apache-2.0 local portrait model once (176 MB), installs the Lua panel, and starts the loopback backend automatically. Restart Darktable after installation.
 
-## Retouch a photo
+## Retouch one photo
 
 1. Open exactly one photo in **Darkroom**.
-2. In **AI Retoucher** on the right, choose Technical, Portrait, or Creative and optionally enter your intent.
-3. Click **Analyse & Apply**.
-4. Optionally click **Refine once** for a model critique, or **Revert AI Retouch** to restore the captured values.
+2. Open **AI Retoucher** in the right panel and choose Portrait, Technical, or Creative.
+3. Describe the desired result, for example:
 
-Enable **Review before applying** if you want to see the model's summary before pressing **Apply reviewed plan**. Preview rendering and temporary-file cleanup are automatic.
+   `Luminous golden-hour maternity portrait. Lift the woman and face, keep the white dress detailed, deepen and warm the forest, mute harsh greens, natural skin and fine texture.`
 
-## What is implemented
+4. Set Strength around `0.65` and Naturalness around `0.85`.
+5. Click **Analyse & Retouch**.
 
-- Loopback-only FastAPI service with `/v1/analyse`, `/v1/critique`, `/v1/apply`, `/v1/revert`, `/health`, `/docs`, and a useful `/` status response.
-- OpenAI Responses API with Pydantic Structured Outputs, bounded values, objective preview statistics, and `store=False`.
-- Automatic 2048 px preview rendering through the `darktable-cli` bundled with the macOS app; only that JPEG preview is sent to OpenAI.
-- Direct Darktable application of exposure, global contrast, saturation, and vibrance through the documented shortcut-action API.
-- Optional one-pass visual critique and exposure refinement.
-- Per-control snapshots, session records, XMP snapshot restoration, and one-click revert.
-- macOS installer/uninstaller and automatic backend startup.
-- Deterministic mappings for additional white balance, tone, foliage, denoise, sharpen, subject, and background operations, with mask-confidence safety gates.
+The first local render after installation can be slower while ONNX initializes. The new file is named like `RVAZ4030-ai-retouched-20260818-174500.tif` and is imported into Darktable automatically. Its mask directory has the same stem plus `-masks`.
 
-Complex controls whose Darktable 5.6 action units have not been calibrated—white-balance chromatic adaptation, tone-equalizer bands, masks, foliage hue ranges, denoise, and diffuse/sharpen—remain validated in the operation manifest but are skipped by the Lua executor rather than guessed. Face/skin masking and pixel-level healing are not performed.
+Enable **Review plan before rendering** if you want to read the plan summary first. **Retouch with saved plan (free)** reuses the most recently rendered plan on the current photo without calling OpenAI—useful for testing or applying a consistent look.
 
-## Service and troubleshooting
+## What is actually applied
 
-The backend listens only on `http://127.0.0.1:8765`. Check it with:
+- 16-bit global exposure, S-curve contrast, black-depth shaping, highlight compression/softness, and shadow lift
+- white-balance temperature/tint, saturation, vibrance, and separate highlight/shadow warmth
+- local ONNX subject matte and inverse-background adjustment
+- masked green/yellow foliage lightness and chroma
+- confidence-gated skin tone, warmth, chroma, and texture-preserving bilateral smoothing
+- edge-preserving denoise and bounded unsharp detail
+- highlight and deep-shadow protection
+- reusable full-resolution 16-bit masks, with explicit applied/skipped reporting in the session JSON
+
+The local model never sends pixels anywhere. OpenAI receives only the temporary 2048 px JPEG used to interpret intent. `store=False` is set on the Responses API request.
+
+## Why the result is a TIFF
+
+Darktable's stable Lua API cannot create arbitrary processing-module instances and drawn/parametric masks reliably. Earlier versions tried to drive a handful of shortcut actions and could only apply a fraction of a plan. This version exports Darktable's current RAW development at full resolution, performs the complete masked retouch locally, and imports a 16-bit TIFF derivative. This preserves the original and gives you a high-bit-depth image you can continue editing, while avoiding unsupported XMP/database manipulation.
+
+## Service and logs
 
 ```bash
 curl http://127.0.0.1:8765/health
 open http://127.0.0.1:8765/docs
 ```
 
-Logs are in `~/Library/Logs/darktable-ai-retoucher/`. Automatic preview errors are written to `/tmp/darktable-ai-retoucher-export.log`.
+Backend logs are in `~/Library/Logs/darktable-ai-retoucher/`. Darktable export failures are logged to `/tmp/darktable-ai-retoucher-export.log`. Session plans and capability reports are stored under `~/.cache/darktable-ai-retoucher/sessions/` by default.
 
-To run the backend in a terminal instead, unload the LaunchAgent with `bash scripts/uninstall_macos.sh`, reinstall the Lua file if desired, then run `uv run ai-retoucher` from this project. The warning about an unrelated active `VIRTUAL_ENV` is harmless; `deactivate` first if you want to remove it.
-
-## Privacy and safety
-
-- RAW and XMP files stay local; only a resized JPEG preview is uploaded for analysis.
-- The model cannot emit Lua or executable module settings.
-- Invalid plans, unsafe ranges, unsupported media, oversized previews, low-confidence masks, and unsupported Darktable controls fail closed.
-- Darktable remains non-destructive: edits live in its history/XMP, and the panel snapshots values before changing them.
+To run the service manually, stop the LaunchAgent with `bash scripts/uninstall_macos.sh`, then run `uv run --python 3.12 ai-retoucher` from the repository.
 
 ## Development
 
 ```bash
-uv sync --extra dev
-uv run pytest
-uv run ruff check .
+uv sync --python 3.12 --extra dev
+uv run --python 3.12 pytest
+uv run --python 3.12 ruff check .
 ```
 
-## Uninstall on macOS
+## Uninstall
 
 ```bash
 bash scripts/uninstall_macos.sh
 ```
 
+Generated TIFFs and their mask folders are user files and are intentionally not deleted by the uninstaller.
+
 ## License
 
-MIT
+MIT. The optional local portrait mask uses the Apache-2.0 U2Net human-segmentation model downloaded by `rembg`.

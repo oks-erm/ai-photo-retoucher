@@ -15,32 +15,23 @@ def test_critique_requires_delta_plan() -> None:
     assert "do not return a replacement EditPlan" in text
 
 
-def test_lua_bridge_applies_real_darktable_actions() -> None:
+def test_lua_bridge_uses_full_resolution_local_render() -> None:
     text = (Path(__file__).parents[1] / "lua" / "ai_retoucher.lua").read_text(encoding="utf-8")
-    assert 'dt.gui.action, path, 0, "value", "set"' in text
-    assert "apply_values(plan, snapshot)" in text
-    assert "restore(applied_state)" in text
-    assert 'path="iop/colorbalancergb/contrast", scale=1' in text
-    assert 'path="iop/colorbalancergb/global saturation", scale=1' in text
-    assert 'path="iop/colorbalancergb/global vibrance", scale=1' in text
-    assert "scale=100" not in text
-    assert "delta * action.scale * multiplier" not in text
-    assert 'path="iop/temperature/temperature", scale=1' in text
-    assert 'path="iop/toneequal/simple/0 EV", scale=-1' in text
-    assert 'path="iop/toneequal/simple/-4 EV", scale=1' in text
-    assert 'path="iop/denoiseprofile/strength", scale=1' in text
-    assert 'path="iop/diffuse/sharpness", scale=1' in text
+    assert 'API .. "/v1/retouch"' in text
+    assert "plugins/imageio/format/tiff/bpp=16" in text
+    assert "--width 0 --height 0 --hq true" in text
+    assert "dt.database.import" in text
+    assert "pcall(dt.gui.action" not in text
 
 
 def test_lua_bridge_is_one_click_and_renders_its_own_preview() -> None:
     text = (Path(__file__).parents[1] / "lua" / "ai_retoucher.lua").read_text(encoding="utf-8")
-    assert 'label = "Analyse & Apply"' in text
+    assert 'label = "Analyse & Retouch"' in text
     assert "darktable-cli" in text
-    assert 'API .. "/v1/critique"' in text
     assert "preview_path" not in text
-    assert '" --configdir " .. quote(config_dir)' in text
-    assert '" --library :memory:"' in text
-    assert 'label = "Apply saved plan (free)"' in text
+    assert '" --core --configdir " .. quote(config_dir)' in text
+    assert '" --library :memory:' in text
+    assert 'label = "Retouch with saved plan (free)"' in text
     assert 'API .. "/v1/plans/latest"' in text
 
 

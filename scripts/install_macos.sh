@@ -30,7 +30,9 @@ if ! grep -Eq '^OPENAI_API_KEY=.+$' "$PROJECT_DIR/.env"; then
 fi
 
 cd "$PROJECT_DIR"
-uv sync
+uv sync --python 3.12
+echo "Preparing the local portrait-mask model (one-time 176 MB download)..."
+uv run --python 3.12 python -c 'from rembg import new_session; new_session("u2net_human_seg")'
 mkdir -p "$LUA_DIR" "$AGENT_DIR" "$LOG_DIR"
 cp "$PROJECT_DIR/lua/ai_retoucher.lua" "$LUA_DIR/ai_retoucher.lua"
 touch "$LUARC"
@@ -59,4 +61,4 @@ launchctl bootout "gui/$(id -u)" "$AGENT_FILE" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENT_FILE"
 launchctl kickstart -k "gui/$(id -u)/com.oksanaerm.darktable-ai-retoucher"
 
-echo "Installed. Restart Darktable, open one photo in Darkroom, and click Analyse & Apply."
+echo "Installed. Restart Darktable, open one photo in Darkroom, and click Analyse & Retouch."

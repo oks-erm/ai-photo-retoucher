@@ -1,6 +1,8 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -10,12 +12,16 @@ from backend.darktable_executor import DarktableExecutor
 from backend.mapper import map_edit_plan
 from backend.openai_client import VisionPlannerClient
 from backend.planner import Planner
+from backend.retouch import RetouchEngine
 from backend.schemas import (
     AnalysisContext,
     ApplyRequest,
     ApplyResponse,
     DeltaPlan,
     EditPlan,
+    MaskArtifact,
+    RetouchReport,
+    RetouchRequest,
     RevertRequest,
     RevertResponse,
 )
@@ -39,7 +45,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = Settings()
     store = SessionStore(settings.resolved_session_dir)
     app.state.settings = settings
+    app.state.store = store
     app.state.executor = DarktableExecutor(store)
+    app.state.retouch_engine = RetouchEngine()
     app.state.planner = Planner(VisionPlannerClient(settings)) if settings.openai_api_key else None
     yield
 
@@ -127,6 +135,55 @@ async def apply_edit(request: Request, body: ApplyRequest) -> ApplyResponse:
         session_id=session_id,
         applied_operations=mapping.operations,
         skipped_operations=mapping.skipped,
+    )
+
+
+@app.post("/v1/retouch", response_model=RetouchReport)
+async def render_retouch(request: Request, body: RetouchRequest) -> RetouchReport:
+    input_path, output_path = await asyncio.to_thread(
+        lambda: (
+            Path(body.input_path).expanduser().resolve(),
+            Path(body.output_path).expanduser().resolve(),
+        )
+    )
+    if not await asyncio.to_thread(input_path.is_file):
+        raise HTTPException(status_code=404, detail="Input render does not exist")
+    if input_path == output_path:
+        raise HTTPException(status_code=422, detail="Output must not overwrite the input")
+    if output_path.suffix.lower() not in {".tif", ".tiff"}:
+        raise HTTPException(status_code=422, detail="Output must be a 16-bit TIFF")
+    try:
+        result = await asyncio.to_thread(
+            request.app.state.retouch_engine.render,
+            input_path,
+            output_path,
+            body.edit_plan,
+            export_masks=body.export_masks,
+        )
+    except (OSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    record = {
+        "image_id": body.image_id,
+        "image_path": str(input_path),
+        "output_path": str(result.output_path),
+        "edit_plan": body.edit_plan.model_dump(by_alias=True),
+        "masks": {name: str(path) for name, path in result.mask_paths.items()},
+        "applied": result.applied,
+        "skipped": result.skipped,
+        "warnings": result.warnings,
+    }
+    session_id = await request.app.state.store.create(record)
+    return RetouchReport(
+        session_id=session_id,
+        output_path=str(result.output_path),
+        masks=[
+            MaskArtifact(name=name, path=str(path), confidence=result.mask_confidence[name])
+            for name, path in result.mask_paths.items()
+        ],
+        applied=result.applied,
+        skipped=result.skipped,
+        warnings=result.warnings,
+        input_bit_depth=result.input_bit_depth,
     )
 
 

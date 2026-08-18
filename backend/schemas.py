@@ -168,3 +168,30 @@ class RevertRequest(StrictModel):
 class RevertResponse(StrictModel):
     session_id: str
     reverted: bool
+
+
+class RetouchRequest(StrictModel):
+    """A local, path-based render request from the Darktable Lua bridge."""
+
+    image_id: str = Field(min_length=1, max_length=512)
+    input_path: str = Field(min_length=1, max_length=4096)
+    output_path: str = Field(min_length=1, max_length=4096)
+    edit_plan: EditPlan
+    export_masks: bool = True
+
+
+class MaskArtifact(StrictModel):
+    name: str
+    path: str
+    confidence: Annotated[float, Field(ge=0, le=1)]
+
+
+class RetouchReport(StrictModel):
+    session_id: str
+    output_path: str
+    masks: list[MaskArtifact]
+    applied: list[str]
+    skipped: list[str]
+    warnings: list[str]
+    input_bit_depth: int
+    output_bit_depth: Literal[16] = 16
