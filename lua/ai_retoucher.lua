@@ -1,32 +1,100 @@
--- Darktable AI Retoucher: stable localhost bridge (Darktable 5.6+).
--- Install by requiring this file from ~/.config/darktable/luarc.
-
+-- Darktable AI Retoucher: one-click macOS/Linux bridge for Darktable 5.6+.
 local dt = require "darktable"
+local API, NAN = "http://127.0.0.1:8765", 0 / 0
+local last_plan, last_session, original_preview, applied_state
 
-local API = "http://127.0.0.1:8765"
-local last_plan = nil
-local last_session = nil
-local applied_state = nil
-local NAN = 0 / 0
-
-local function quote(value)
-  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+local function quote(v) return "'" .. tostring(v):gsub("'", "'\\''") .. "'" end
+local function json_quote(v)
+  local s = tostring(v):gsub("\\", "\\\\"):gsub('"', '\\"')
+  s = s:gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
+  return '"' .. s .. '"'
 end
-
+local function remove_file(p) if p then pcall(os.remove, p) end end
+local function read_file(p)
+  local f = io.open(p, "r"); if not f then return nil end
+  local body = f:read("*a"); f:close(); return body
+end
 local function selected_image()
   local images = dt.gui.action_images
-  if images == nil or #images ~= 1 then
-    dt.print_error("AI Retoucher: select exactly one image")
-    return nil
-  end
+  if not images or #images ~= 1 then dt.print_error("AI Retoucher: open exactly one image"); return nil end
   return images[1]
 end
+local function in_darkroom() return dt.gui.current_view() == dt.gui.views.darkroom end
+local function object(json, key) return json and json:match('"' .. key .. '"%s*:%s*(%b{})') end
+local function number(json, key)
+  return json and tonumber(json:match('"' .. key .. '"%s*:%s*(-?[%d%.]+)')) or nil
+end
+local function boolean(json, key)
+  if not json then return nil end
+  if json:match('"' .. key .. '"%s*:%s*true') then return true end
+  if json:match('"' .. key .. '"%s*:%s*false') then return false end
+  return nil
+end
+local function text_value(json, key)
+  if not json then return nil end
+  local value = json:match('"' .. key .. '"%s*:%s*"(.-)"')
+  if value then return value:gsub('\\n', ' '):gsub('\\"', '"'):gsub('\\\\', '\\') end
+  return nil
+end
+local function api_available()
+  return os.execute("curl --connect-timeout 1 --max-time 2 --fail --silent "
+    .. quote(API .. "/health") .. " >/dev/null 2>&1") == true
+end
+local function darktable_cli()
+  local configured = dt.preferences.read("ai_retoucher", "darktable_cli", "string")
+  if configured and configured ~= "" then return configured end
+  local os_name = tostring(dt.configuration.running_os):lower()
+  if os_name == "macos" or os_name == "osx" or os_name == "darwin" then
+    return "/Applications/darktable.app/Contents/MacOS/darktable-cli"
+  end
+  return "darktable-cli"
+end
+local function render_preview(image)
+  local source, output = image.path .. "/" .. image.filename, os.tmpname() .. ".jpg"
+  local command = quote(darktable_cli()) .. " " .. quote(source) .. " " .. quote(output)
+    .. " --width 2048 --height 2048 --hq false --core --library :memory:"
+    .. " >/tmp/darktable-ai-retoucher-export.log 2>&1"
+  if os.execute(command) ~= true then remove_file(output); return nil,
+    "preview render failed; see /tmp/darktable-ai-retoucher-export.log" end
+  return output
+end
+local function analyse_api(preview, context)
+  local output = os.tmpname()
+  local command = "curl --fail --silent --show-error -o " .. quote(output)
+    .. " -F image=@" .. quote(preview) .. " -F context=" .. quote(context)
+    .. " " .. quote(API .. "/v1/analyse")
+  if os.execute(command) ~= true then remove_file(output); return nil end
+  local body = read_file(output); remove_file(output); return body
+end
+local function apply_api(image, plan)
+  local payload_path, response_path = os.tmpname(), os.tmpname()
+  local payload = io.open(payload_path, "w"); if not payload then return nil end
+  payload:write('{"image_id":' .. json_quote(tostring(image.id))
+    .. ',"image_path":' .. json_quote(image.path .. "/" .. image.filename)
+    .. ',"edit_plan":' .. plan .. '}'); payload:close()
+  local command = "curl --fail --silent --show-error -o " .. quote(response_path)
+    .. " -H 'Content-Type: application/json' --data-binary @" .. quote(payload_path)
+    .. " " .. quote(API .. "/v1/apply")
+  local ok = os.execute(command) == true; remove_file(payload_path)
+  if not ok then remove_file(response_path); return nil end
+  local body = read_file(response_path); remove_file(response_path)
+  return body and body:match('"session_id"%s*:%s*"([%w]+)"')
+end
+local function critique_api(original, edited, plan)
+  local output = os.tmpname()
+  local command = "curl --fail --silent --show-error -o " .. quote(output)
+    .. " -F original=@" .. quote(original) .. " -F edited=@" .. quote(edited)
+    .. " -F previous_plan=" .. quote(plan) .. " " .. quote(API .. "/v1/critique")
+  if os.execute(command) ~= true then remove_file(output); return nil end
+  local body = read_file(output); remove_file(output); return body
+end
+local function revert_api(id)
+  return os.execute("curl --fail --silent -H 'Content-Type: application/json' --data "
+    .. quote('{"session_id":' .. json_quote(id) .. '}') .. " "
+    .. quote(API .. "/v1/revert") .. " >/dev/null") == true
+end
 
-local mode = dt.new_widget("combobox") {
-  label = "Mode",
-  "Technical", "Portrait", "Creative",
-  selected = 1,
-}
+local mode = dt.new_widget("combobox") { label = "Mode", "Technical", "Portrait", "Creative", selected = 1 }
 local intent = dt.new_widget("entry") { placeholder = "Natural correction or desired mood" }
 local strength = dt.new_widget("slider") { label = "Strength", min = 0, max = 1, step = 0.05, value = 0.5 }
 local naturalness = dt.new_widget("slider") { label = "Naturalness", min = 0, max = 1, step = 0.05, value = 0.8 }
@@ -34,206 +102,137 @@ local protect_skin = dt.new_widget("check_button") { label = "Protect skin", val
 local protect_highlights = dt.new_widget("check_button") { label = "Protect highlights", value = true }
 local preserve_shadows = dt.new_widget("check_button") { label = "Preserve deep shadows", value = true }
 local preserve_colours = dt.new_widget("check_button") { label = "Preserve scene colours", value = true }
-local summary = dt.new_widget("label") { label = "No plan analysed" }
-
-local function mode_value()
-  return ({ "technical", "portrait", "creative" })[mode.selected]
-end
-
-local function object(json, key)
-  return json:match('"' .. key .. '"%s*:%s*(%b{})')
-end
-
-local function number(json, key)
-  if json == nil then return nil end
-  local value = json:match('"' .. key .. '"%s*:%s*(-?[%d%.]+)')
-  return tonumber(value)
-end
-
-local function in_darkroom()
-  return dt.gui.current_view() == dt.gui.views.darkroom
+local review_first = dt.new_widget("check_button") { label = "Review before applying", value = false }
+local summary = dt.new_widget("label") { label = "Ready" }
+local function mode_value() return ({ "technical", "portrait", "creative" })[mode.selected] end
+local function context()
+  return '{"mode":' .. json_quote(mode_value()) .. ',"intent":'
+    .. json_quote(intent.text ~= "" and intent.text or "Natural professional correction")
+    .. string.format(',"strength":%.3f,"naturalness":%.3f', strength.value, naturalness.value)
+    .. ',"protect_skin":' .. tostring(protect_skin.value)
+    .. ',"protect_highlights":' .. tostring(protect_highlights.value)
+    .. ',"preserve_deep_shadows":' .. tostring(preserve_shadows.value)
+    .. ',"preserve_scene_colours":' .. tostring(preserve_colours.value)
+    .. ',"exif":{},"current_state":""}'
 end
 
 local ACTIONS = {
-  -- EditPlan values are semantic deltas. scale converts them to the units used
-  -- by Darktable's corresponding slider. Paths are stable shortcut action paths.
-  { section = "global", key = "exposure_ev", path = "iop/exposure/exposure", scale = 1.0 },
-  { section = "global", key = "contrast", path = "iop/colorbalancergb/global contrast", scale = 100.0 },
-  { section = "global", key = "saturation", path = "iop/colorbalancergb/global saturation", scale = 100.0 },
-  { section = "global", key = "vibrance", path = "iop/colorbalancergb/global vibrance", scale = 100.0 },
+  { section="global", key="exposure_ev", path="iop/exposure/exposure", scale=1 },
+  { section="global", key="contrast", path="iop/colorbalancergb/global contrast", scale=100 },
+  { section="global", key="saturation", path="iop/colorbalancergb/global saturation", scale=100 },
+  { section="global", key="vibrance", path="iop/colorbalancergb/global vibrance", scale=100 },
 }
-
 local function read_action(path)
   local ok, status = pcall(dt.gui.action, path, 0, "value", "set", NAN)
-  if not ok then return nil, tostring(status) end
-  local value = tonumber(status)
-  if value == nil then return nil, "non-numeric action status: " .. tostring(status) end
-  return value, nil
+  local value = ok and tonumber(status) or nil
+  return value, value and nil or tostring(status)
 end
-
 local function set_action(path, value)
   local ok, status = pcall(dt.gui.action, path, 0, "value", "set", value)
-  if not ok then return false, tostring(status) end
-  return true, tostring(status)
+  return ok, tostring(status)
 end
-
-local function enable_module(path)
+local function enable(path)
   local module = path:match("^(iop/[^/]+)")
-  if module == nil then return false end
-  local ok = pcall(dt.gui.action, module, 0, "enable", "on", 1.0)
-  return ok
+  if module then pcall(dt.gui.action, module, 0, "enable", "on", 1) end
 end
-
-local function apply_plan_to_darktable(plan)
-  if not in_darkroom() then
-    return nil, "open the selected image in Darkroom before applying"
-  end
-  local snapshot = {}
-  local applied = 0
-  local failures = {}
+local function apply_values(values, snapshot, use_strength)
+  local applied, failures = 0, {}
   for _, action in ipairs(ACTIONS) do
-    local section = object(plan, action.section)
-    local delta = number(section, action.key)
-    if delta ~= nil and math.abs(delta) > 0.000001 then
-      enable_module(action.path)
-      local previous, read_error = read_action(action.path)
-      if previous == nil then
-        table.insert(failures, action.key .. ": " .. read_error)
-      else
-        local target = previous + delta * action.scale * strength.value
-        local ok, set_error = set_action(action.path, target)
-        if ok then
-          table.insert(snapshot, { path = action.path, value = previous })
-          applied = applied + 1
-        else
-          table.insert(failures, action.key .. ": " .. set_error)
-        end
+    local delta = number(object(values, action.section), action.key)
+    if delta and math.abs(delta) > 0.000001 then
+      enable(action.path)
+      local previous, err = read_action(action.path)
+      if not previous then table.insert(failures, action.key .. ": " .. err) else
+        if snapshot then table.insert(snapshot, { path=action.path, value=previous }) end
+        local multiplier = use_strength and strength.value or 1
+        local ok, set_err = set_action(action.path, previous + delta * action.scale * multiplier)
+        if ok then applied = applied + 1 else table.insert(failures, action.key .. ": " .. set_err) end
       end
     end
   end
-  if applied == 0 then
-    return nil, "no supported non-zero adjustments could be applied; " .. table.concat(failures, "; ")
-  end
-  return snapshot, table.concat(failures, "; ")
+  return applied, table.concat(failures, "; ")
 end
-
-local function restore_darktable(snapshot)
-  if not in_darkroom() then return false, "open the edited image in Darkroom first" end
+local function restore(snapshot)
   local failures = {}
-  for index = #snapshot, 1, -1 do
-    local item = snapshot[index]
-    local ok, err = set_action(item.path, item.value)
-    if not ok then table.insert(failures, item.path .. ": " .. err) end
+  for i = #snapshot, 1, -1 do
+    local ok, err = set_action(snapshot[i].path, snapshot[i].value)
+    if not ok then table.insert(failures, err) end
   end
   return #failures == 0, table.concat(failures, "; ")
 end
+local function analyse_current()
+  if not in_darkroom() then return nil, nil, "open one image in Darkroom" end
+  if not api_available() then return nil, nil, "backend is not running" end
+  local image = selected_image(); if not image then return nil, nil, "no image" end
+  summary.label = "Rendering preview…"
+  local preview, err = render_preview(image); if not preview then return nil, nil, err end
+  summary.label = "Analysing…"
+  local plan = analyse_api(preview, context())
+  if not plan then remove_file(preview); return nil, nil, "analysis failed" end
+  return image, preview, plan
+end
+local function apply_reviewed(image, preview, plan)
+  local session = apply_api(image, plan); if not session then return false, "session failed" end
+  local snapshot = {}; local count, message = apply_values(plan, snapshot, true)
+  if count == 0 then revert_api(session); return false, message ~= "" and message or "no supported changes" end
+  remove_file(original_preview); original_preview, last_plan, last_session, applied_state = preview, plan, session, snapshot
+  return true, message
+end
 
-local analyse = dt.new_widget("button") {
-  label = "Analyse exported preview",
+local analyse_apply = dt.new_widget("button") {
+  label = "Analyse & Apply",
   clicked_callback = function()
-    local image = selected_image()
-    if image == nil then return end
-    -- Darktable Lua does not expose a stable current-pipeline preview export across all
-    -- supported builds. Export a JPEG from Darkroom first; this bridge accepts that path.
-    local preview = dt.preferences.read("ai_retoucher", "preview_path", "string")
-    if preview == nil or preview == "" then
-      dt.print_error("AI Retoucher: set ai_retoucher/preview_path in preferences")
-      return
-    end
-    local context = string.format(
-      '{"mode":%q,"intent":%q,"strength":%.3f,"naturalness":%.3f,"protect_skin":%s,"protect_highlights":%s,"preserve_deep_shadows":%s,"preserve_scene_colours":%s,"exif":{},"current_state":""}',
-      mode_value(), intent.text, strength.value, naturalness.value,
-      tostring(protect_skin.value), tostring(protect_highlights.value),
-      tostring(preserve_shadows.value), tostring(preserve_colours.value)
-    )
-    local output = os.tmpname()
-    local command = "curl --fail --silent --show-error -o " .. quote(output)
-      .. " -F image=@" .. quote(preview)
-      .. " -F context=" .. quote(context)
-      .. " " .. quote(API .. "/v1/analyse")
-    if os.execute(command) then
-      local file = io.open(output, "r")
-      if file ~= nil then last_plan = file:read("*a"); file:close() end
-      summary.label = last_plan or "Analysis returned no plan"
-      dt.print("AI Retoucher: plan ready for review")
-    else
-      dt.print_error("AI Retoucher: analysis failed; Darktable remains unchanged")
-    end
-    os.remove(output)
+    local image, preview, plan = analyse_current()
+    if not image then summary.label = "Error: " .. plan; dt.print_error(summary.label); return end
+    last_plan = plan
+    if review_first.value then remove_file(original_preview); original_preview = preview
+      local description = text_value(plan, "summary") or "Plan ready"
+      summary.label = description .. " — press Apply reviewed plan"; return end
+    local ok, message = apply_reviewed(image, preview, plan)
+    summary.label = ok and (message ~= "" and "Applied; some controls skipped" or "Applied") or "Apply failed: " .. message
+    if not ok then dt.print_error(summary.label) end
   end,
 }
-
-local apply = dt.new_widget("button") {
-  label = "Apply plan",
+local apply_reviewed_button = dt.new_widget("button") {
+  label = "Apply reviewed plan",
   clicked_callback = function()
-    local image = selected_image()
-    if image == nil or last_plan == nil then
-      dt.print_error("AI Retoucher: analyse and review a plan first")
-      return
-    end
-    local payload_path = os.tmpname()
-    local response_path = os.tmpname()
-    local payload = io.open(payload_path, "w")
-    payload:write('{"image_id":' .. string.format("%q", tostring(image.id))
-      .. ',"image_path":' .. string.format("%q", image.path .. "/" .. image.filename)
-      .. ',"edit_plan":' .. last_plan .. '}')
-    payload:close()
-    local command = "curl --fail --silent --show-error -o " .. quote(response_path)
-      .. " -H 'Content-Type: application/json' --data-binary @" .. quote(payload_path)
-      .. " " .. quote(API .. "/v1/apply")
-    if os.execute(command) then
-      local response = io.open(response_path, "r")
-      local body = response and response:read("*a") or ""
-      if response then response:close() end
-      last_session = body:match('"session_id"%s*:%s*"([%w]+)"')
-      local snapshot, apply_message = apply_plan_to_darktable(last_plan)
-      if snapshot == nil then
-        dt.print_error("AI Retoucher: plan stored, but Darktable apply failed: " .. apply_message)
-      else
-        applied_state = snapshot
-        if apply_message ~= "" then
-          dt.print("AI Retoucher: applied with skipped controls: " .. apply_message)
-        else
-          dt.print("AI Retoucher: edit applied to the current Darktable history")
-        end
-      end
-    else
-      dt.print_error("AI Retoucher: apply failed; no partial edit was committed")
-    end
-    os.remove(payload_path); os.remove(response_path)
+    if not last_plan or not original_preview then dt.print_error("No reviewed plan"); return end
+    local image = selected_image(); if not image then return end
+    local preview = original_preview; original_preview = nil
+    local ok, message = apply_reviewed(image, preview, last_plan)
+    summary.label = ok and "Applied" or "Apply failed: " .. message
   end,
 }
-
+local refine = dt.new_widget("button") {
+  label = "Refine once",
+  clicked_callback = function()
+    if not original_preview or not last_plan or not applied_state then dt.print_error("Apply first"); return end
+    local image = selected_image(); if not image then return end
+    summary.label = "Rendering edited preview…"
+    local edited, err = render_preview(image); if not edited then summary.label = err; return end
+    summary.label = "Critiquing…"; local delta = critique_api(original_preview, edited, last_plan); remove_file(edited)
+    if not delta then summary.label = "Critique failed"; return end
+    if boolean(delta, "accepted") then summary.label = "Critic accepted the edit"; return end
+    local exposure_delta = number(delta, "global_exposure_delta") or 0
+    local synthetic = '{"global":{"exposure_ev":' .. tostring(exposure_delta) .. '}}'
+    local count, message = apply_values(synthetic, nil, false)
+    summary.label = count > 0 and "Refinement applied" or message
+  end,
+}
 local revert = dt.new_widget("button") {
   label = "Revert AI Retouch",
   clicked_callback = function()
-    if last_session == nil or applied_state == nil then
-      dt.print_error("AI Retoucher: no active applied session"); return
-    end
-    local restored, restore_error = restore_darktable(applied_state)
-    if not restored then
-      dt.print_error("AI Retoucher: could not restore every Darktable value: " .. restore_error)
-      return
-    end
-    local command = "curl --fail --silent -H 'Content-Type: application/json' --data "
-      .. quote('{"session_id":"' .. last_session .. '"}') .. " " .. quote(API .. "/v1/revert")
-    if os.execute(command) then
-      last_session = nil
-      applied_state = nil
-      dt.print("AI Retoucher: Darktable values and backend session reverted")
-    else
-      dt.print_error("AI Retoucher: revert failed")
-    end
+    if not applied_state or not last_session then dt.print_error("No active retouch"); return end
+    if not in_darkroom() then dt.print_error("Open edited image in Darkroom"); return end
+    local ok, err = restore(applied_state); if not ok then dt.print_error("Revert incomplete: " .. err); return end
+    revert_api(last_session); remove_file(original_preview)
+    last_plan, last_session, original_preview, applied_state = nil, nil, nil, nil
+    summary.label = "Reverted"
   end,
 }
-
-dt.register_lib(
-  "ai_retoucher", "AI Retoucher", true, false,
+dt.register_event("ai-retoucher-exit", "exit", function() remove_file(original_preview) end)
+dt.register_lib("ai_retoucher", "AI Retoucher", true, false,
   { [dt.gui.views.darkroom] = { "DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100 } },
-  dt.new_widget("box") {
-    orientation = "vertical",
-    mode, intent, strength, naturalness, protect_skin, protect_highlights,
-    preserve_shadows, preserve_colours, analyse, summary, apply, revert,
-  },
-  nil, nil
-)
+  dt.new_widget("box") { orientation="vertical", mode, intent, strength, naturalness,
+    protect_skin, protect_highlights, preserve_shadows, preserve_colours, review_first,
+    analyse_apply, apply_reviewed_button, refine, revert, summary }, nil, nil)
