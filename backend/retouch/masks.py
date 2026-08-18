@@ -169,7 +169,7 @@ def _model_subject_mask(rgb: FloatImage, *, portrait: bool) -> tuple[FloatImage,
     """Run a local ONNX saliency/person model; never sends pixels off-device."""
     from rembg import remove
 
-    model_name = "u2net_human_seg" if portrait else "isnet-general-use"
+    model_name = "u2net_human_seg" if portrait else "u2net"
     image = Image.fromarray(np.clip(rgb * 255, 0, 255).astype(np.uint8), "RGB")
     try:
         mask_image = remove(image, session=_rembg_session(model_name), only_mask=True)
