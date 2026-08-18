@@ -13,3 +13,10 @@ def test_critique_requires_delta_plan() -> None:
     text = (Path(__file__).parents[1] / "prompts" / "critique.md").read_text(encoding="utf-8")
     assert "DeltaPlan" in text
     assert "do not return a replacement EditPlan" in text
+
+
+def test_lua_bridge_applies_real_darktable_actions() -> None:
+    text = (Path(__file__).parents[1] / "lua" / "ai_retoucher.lua").read_text(encoding="utf-8")
+    assert 'dt.gui.action, path, 0, "value", "set"' in text
+    assert "apply_plan_to_darktable(last_plan)" in text
+    assert "restore_darktable(applied_state)" in text
