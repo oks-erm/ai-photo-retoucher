@@ -96,8 +96,14 @@ end
 
 local mode = dt.new_widget("combobox") { label = "Mode", "Technical", "Portrait", "Creative", selected = 1 }
 local intent = dt.new_widget("entry") { placeholder = "Natural correction or desired mood" }
-local strength = dt.new_widget("slider") { label = "Strength", min = 0, max = 1, step = 0.05, value = 0.5 }
-local naturalness = dt.new_widget("slider") { label = "Naturalness", min = 0, max = 1, step = 0.05, value = 0.8 }
+local strength = dt.new_widget("slider") {
+  label = "Strength", soft_min = 0, soft_max = 1, hard_min = 0, hard_max = 1,
+  step = 0.05, digits = 2, value = 0.5,
+}
+local naturalness = dt.new_widget("slider") {
+  label = "Naturalness", soft_min = 0, soft_max = 1, hard_min = 0, hard_max = 1,
+  step = 0.05, digits = 2, value = 0.8,
+}
 local protect_skin = dt.new_widget("check_button") { label = "Protect skin", value = true }
 local protect_highlights = dt.new_widget("check_button") { label = "Protect highlights", value = true }
 local preserve_shadows = dt.new_widget("check_button") { label = "Preserve deep shadows", value = true }
