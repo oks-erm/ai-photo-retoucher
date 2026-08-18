@@ -20,6 +20,10 @@ def test_lua_bridge_applies_real_darktable_actions() -> None:
     assert 'dt.gui.action, path, 0, "value", "set"' in text
     assert "apply_values(plan, snapshot, true)" in text
     assert "restore(applied_state)" in text
+    assert 'path="iop/colorbalancergb/contrast", scale=1' in text
+    assert 'path="iop/colorbalancergb/global saturation", scale=1' in text
+    assert 'path="iop/colorbalancergb/global vibrance", scale=1' in text
+    assert "scale=100" not in text
 
 
 def test_lua_bridge_is_one_click_and_renders_its_own_preview() -> None:
