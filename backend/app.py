@@ -13,6 +13,7 @@ from backend.mapper import map_edit_plan
 from backend.openai_client import VisionPlannerClient
 from backend.planner import Planner
 from backend.retouch import RetouchEngine
+from backend.retouch.style import StyleRefiner
 from backend.schemas import (
     AnalysisContext,
     ApplyRequest,
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.store = store
     app.state.executor = DarktableExecutor(store)
     app.state.retouch_engine = RetouchEngine()
+    app.state.style_refiner = StyleRefiner(app.state.retouch_engine)
     app.state.planner = Planner(VisionPlannerClient(settings)) if settings.openai_api_key else None
     yield
 
@@ -153,11 +155,19 @@ async def render_retouch(request: Request, body: RetouchRequest) -> RetouchRepor
     if output_path.suffix.lower() not in {".tif", ".tiff"}:
         raise HTTPException(status_code=422, detail="Output must be a 16-bit TIFF")
     try:
+        rgb, _ = await asyncio.to_thread(request.app.state.retouch_engine.read, input_path)
+        refinement = await asyncio.to_thread(
+            request.app.state.style_refiner.refine,
+            rgb,
+            body.edit_plan,
+            style=body.style,
+            maximum_passes=body.refinement_passes if body.auto_refine else 0,
+        )
         result = await asyncio.to_thread(
             request.app.state.retouch_engine.render,
             input_path,
             output_path,
-            body.edit_plan,
+            refinement.plan,
             export_masks=body.export_masks,
         )
     except (OSError, ValueError) as error:
@@ -166,7 +176,12 @@ async def render_retouch(request: Request, body: RetouchRequest) -> RetouchRepor
         "image_id": body.image_id,
         "image_path": str(input_path),
         "output_path": str(result.output_path),
-        "edit_plan": body.edit_plan.model_dump(by_alias=True),
+        "model_edit_plan": body.edit_plan.model_dump(by_alias=True),
+        "edit_plan": refinement.plan.model_dump(by_alias=True),
+        "style": body.style,
+        "refinement_passes": refinement.passes,
+        "initial_style_distance": refinement.initial_distance,
+        "final_style_distance": refinement.final_distance,
         "masks": {name: str(path) for name, path in result.mask_paths.items()},
         "applied": result.applied,
         "skipped": result.skipped,
@@ -183,6 +198,10 @@ async def render_retouch(request: Request, body: RetouchRequest) -> RetouchRepor
         applied=result.applied,
         skipped=result.skipped,
         warnings=result.warnings,
+        final_plan=refinement.plan,
+        refinement_passes=refinement.passes,
+        initial_style_distance=refinement.initial_distance,
+        final_style_distance=refinement.final_distance,
         input_bit_depth=result.input_bit_depth,
     )
 

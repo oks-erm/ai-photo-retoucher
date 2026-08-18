@@ -75,12 +75,13 @@ local function output_path(image)
   local stem = image.filename:gsub("%.[^%.]+$", "")
   return image.path .. "/" .. stem .. "-ai-retouched-" .. os.date("%Y%m%d-%H%M%S") .. ".tif"
 end
-local function retouch_api(image, input, output, plan)
+local function retouch_api(image, input, output, plan, style_name)
   local payload_path = os.tmpname()
   local payload = io.open(payload_path, "w"); if not payload then return nil, "request failed" end
   payload:write('{"image_id":' .. json_quote(tostring(image.id))
     .. ',"input_path":' .. json_quote(input) .. ',"output_path":' .. json_quote(output)
-    .. ',"edit_plan":' .. plan .. ',"export_masks":true}')
+    .. ',"edit_plan":' .. plan .. ',"export_masks":true,"style":'
+    .. json_quote(style_name) .. ',"auto_refine":true,"refinement_passes":6}')
   payload:close()
   local body = request_file("curl --fail --silent --show-error -H 'Content-Type: application/json'"
     .. " --data-binary @" .. quote(payload_path) .. " " .. quote(API .. "/v1/retouch"))
@@ -93,6 +94,9 @@ end
 
 local mode = dt.new_widget("combobox") {
   label = "Mode", "Technical", "Portrait", "Creative", selected = 2,
+}
+local style = dt.new_widget("combobox") {
+  label = "Style", "Golden cinematic", "Custom intent only", selected = 1,
 }
 local intent = dt.new_widget("entry") {
   placeholder = "e.g. luminous golden-hour portrait, natural skin",
@@ -120,9 +124,11 @@ local review_first = dt.new_widget("check_button") {
 local status = dt.new_widget("label") { label = "Ready — original RAW will not be changed" }
 local function context()
   local modes = { "technical", "portrait", "creative" }
+  local styles = { "golden_cinematic", "custom" }
   local requested = intent.text ~= "" and intent.text or
     "Natural professional retouch with balanced colour and subject separation"
-  return '{"mode":' .. json_quote(modes[mode.selected]) .. ',"intent":' .. json_quote(requested)
+  return '{"mode":' .. json_quote(modes[mode.selected])
+    .. ',"style":' .. json_quote(styles[style.selected]) .. ',"intent":' .. json_quote(requested)
     .. string.format(',"strength":%.3f,"naturalness":%.3f', strength.value, naturalness.value)
     .. ',"protect_skin":' .. tostring(protect_skin.value)
     .. ',"protect_highlights":' .. tostring(protect_highlights.value)
@@ -140,7 +146,8 @@ local function render_plan(image, plan)
   if not working then return false, export_error end
   local output = output_path(image)
   status.label = "Building masks and retouching locally…"
-  local rendered, retouch_error = retouch_api(image, working, output, plan)
+  local styles = { "golden_cinematic", "custom" }
+  local rendered, retouch_error = retouch_api(image, working, output, plan, styles[style.selected])
   remove_file(working)
   if not rendered then return false, retouch_error end
   status.label = "Importing editable TIFF into Darktable…"
@@ -199,7 +206,7 @@ dt.register_event("ai-retoucher-exit", "exit", function() remove_file(reviewed_p
 dt.register_lib("ai_retoucher", "AI Retoucher", true, false,
   { [dt.gui.views.darkroom] = { "DT_UI_CONTAINER_PANEL_RIGHT_CENTER", 100 } },
   dt.new_widget("box") {
-    orientation = "vertical", mode, intent, strength, naturalness,
+    orientation = "vertical", mode, style, intent, strength, naturalness,
     protect_skin, protect_highlights, preserve_shadows, review_first,
     analyse_retouch, render_reviewed, render_saved, status,
   }, nil, nil)

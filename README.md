@@ -1,6 +1,6 @@
 # Darktable AI Retoucher
 
-Describe the finish you want in Darktable and get a full-resolution, masked, 16-bit TIFF retouch beside the original RAW. OpenAI turns a private 2048 px preview and your intent into a bounded edit plan; all final pixel processing and masks run locally on the Mac.
+Describe the finish you want in Darktable and get a full-resolution, masked, 16-bit TIFF retouch beside the original RAW. OpenAI turns a private 2048 px preview and your intent into a bounded edit plan with exactly one API request. Up to six deterministic local measurement/render passes then tune that same plan toward the selected style—without further API use. All final pixel processing and masks run locally on the Mac.
 
 The result is a new TIFF imported into Darktable. The RAW and its existing history remain untouched, and the TIFF can be developed further with normal Darktable modules. Six full-resolution 16-bit masks are saved beside it for subject, background, skin, face, foliage, and sky.
 
@@ -22,7 +22,7 @@ The installer uses Python 3.12, downloads the Apache-2.0 local portrait model on
 ## Retouch one photo
 
 1. Open exactly one photo in **Darkroom**.
-2. Open **AI Retoucher** in the right panel and choose Portrait, Technical, or Creative.
+2. Open **AI Retoucher** in the right panel, choose Portrait, Technical, or Creative, and leave **Golden cinematic** selected for the supplied reference look.
 3. Describe the desired result, for example:
 
    `Luminous golden-hour maternity portrait. Lift the woman and face, keep the white dress detailed, deepen and warm the forest, mute harsh greens, natural skin and fine texture.`
@@ -30,7 +30,9 @@ The installer uses Python 3.12, downloads the Apache-2.0 local portrait model on
 4. Set Strength around `0.65` and Naturalness around `0.85`.
 5. Click **Analyse & Retouch**.
 
-The first local render after installation can be slower while ONNX initializes. The new file is named like `RVAZ4030-ai-retouched-20260818-174500.tif` and is imported into Darktable automatically. Its mask directory has the same stem plus `-masks`.
+The first local render after installation can be slower while ONNX initializes. The new file is rendered at the source dimensions, named like `RVAZ4030-ai-retouched-20260818-174500.tif`, and imported into Darktable automatically. Its mask directory has the same stem plus `-masks`.
+
+**Golden cinematic** is a reusable style signature measured from the supplied example, not a hardcoded recipe for that one frame. It locally aims for a brighter, warmer subject; protected white clothing and skin texture; a substantially darker background and sky; and deeper, quieter foliage. Each pass measures the current image, adjusts bounded plan values, renders again, and keeps only an improvement. Choose **Custom intent only** to apply the model's plan without this style convergence.
 
 Enable **Review plan before rendering** if you want to read the plan summary first. **Retouch with saved plan (free)** reuses the most recently rendered plan on the current photo without calling OpenAI—useful for testing or applying a consistent look.
 
@@ -39,13 +41,14 @@ Enable **Review plan before rendering** if you want to read the plan summary fir
 - 16-bit global exposure, S-curve contrast, black-depth shaping, highlight compression/softness, and shadow lift
 - white-balance temperature/tint, saturation, vibrance, and separate highlight/shadow warmth
 - local ONNX subject matte and inverse-background adjustment
+- soft sky/background luminance mask with bounded darkening, warmth, and saturation
 - masked green/yellow foliage lightness and chroma
 - confidence-gated skin tone, warmth, chroma, and texture-preserving bilateral smoothing
 - edge-preserving denoise and bounded unsharp detail
 - highlight and deep-shadow protection
 - reusable full-resolution 16-bit masks, with explicit applied/skipped reporting in the session JSON
 
-The local model never sends pixels anywhere. OpenAI receives only the temporary 2048 px JPEG used to interpret intent. `store=False` is set on the Responses API request.
+The local models and refinement loop never send pixels anywhere. OpenAI receives only the temporary 2048 px JPEG used for the single intent-to-plan request. `store=False` is set on the Responses API request.
 
 ## Why the result is a TIFF
 

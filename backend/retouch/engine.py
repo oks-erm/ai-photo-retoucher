@@ -84,16 +84,26 @@ def _tone(rgb: FloatImage, plan: EditPlan) -> FloatImage:
 
 
 def _local_adjust(
-    rgb: FloatImage, mask: NDArray[np.float32], exposure: float, contrast: float, saturation: float
+    rgb: FloatImage,
+    mask: NDArray[np.float32],
+    exposure: float,
+    contrast: float,
+    saturation: float,
+    warmth: float = 0,
 ) -> FloatImage:
     adjusted = _linear_to_srgb(_srgb_to_linear(rgb) * (2**exposure))
     contrast_power = max(0.72, 1 + contrast * 0.9)
     numerator = adjusted**contrast_power
     denominator = numerator + np.clip(1 - adjusted, 0, 1) ** contrast_power
-    adjusted = np.divide(
-        numerator, denominator, out=np.zeros_like(adjusted), where=denominator > 0
-    )
+    adjusted = np.divide(numerator, denominator, out=np.zeros_like(adjusted), where=denominator > 0)
     adjusted = _saturation(adjusted, saturation)
+    if warmth:
+        adjusted = np.clip(
+            adjusted
+            * np.array([1 + warmth * 0.35, 1 + warmth * 0.05, 1 - warmth * 0.30], np.float32),
+            0,
+            1,
+        )
     return _blend(rgb, adjusted, mask)
 
 
@@ -128,9 +138,9 @@ def _skin_retouch(
             result
             * np.array(
                 [
-                    1 + plan.skin.warmth * 0.18,
-                    1 + plan.skin.warmth * 0.04,
-                    1 - plan.skin.warmth * 0.15,
+                    1 + plan.skin.warmth * 0.30,
+                    1 + plan.skin.warmth * 0.06,
+                    1 - plan.skin.warmth * 0.25,
                 ],
                 np.float32,
             ),
@@ -165,15 +175,12 @@ class RetouchEngine:
         maximum = float(np.iinfo(raw.dtype).max) if np.issubdtype(raw.dtype, np.integer) else 1.0
         return np.clip(raw.astype(np.float32) / maximum, 0, 1), bit_depth
 
-    def render(
-        self, input_path: Path, output_path: Path, plan: EditPlan, *, export_masks: bool = True
-    ) -> RenderResult:
-        rgb, input_bit_depth = self.read(input_path)
-        masks = build_masks(rgb, portrait=plan.scene.category.value == "portrait")
+    def render_pixels(
+        self, rgb: FloatImage, masks: MaskSet, plan: EditPlan
+    ) -> tuple[FloatImage, list[str], list[str]]:
+        """Apply every executable plan field to RGB pixels using reusable masks."""
         applied: list[str] = []
         skipped: list[str] = []
-        warnings: list[str] = []
-
         result = _temperature(
             rgb, plan.white_balance.temperature_delta_k, plan.white_balance.tint_delta
         )
@@ -190,30 +197,51 @@ class RetouchEngine:
         if plan.highlights.warmth or plan.shadows.warmth:
             applied.append("split tonal warmth")
 
-        if plan.subject.enabled:
-            if masks.confidence["subject"] >= 0.45:
+        for name, adjustment, mask in (
+            ("subject", plan.subject, masks.subject),
+            ("background", plan.background, masks.background),
+        ):
+            if not adjustment.enabled:
+                continue
+            if masks.confidence[name] < 0.45:
+                skipped.append(f"{name}: confidence below safe threshold")
+                continue
+            result = _local_adjust(
+                result,
+                mask,
+                adjustment.exposure_ev,
+                adjustment.contrast,
+                adjustment.saturation,
+                adjustment.warmth,
+            )
+            applied.append(f"masked {name} adjustment")
+
+        if plan.sky.enabled:
+            if masks.confidence["sky"] >= 0.45:
                 result = _local_adjust(
                     result,
-                    masks.subject,
-                    plan.subject.exposure_ev,
-                    plan.subject.contrast,
-                    plan.subject.saturation,
+                    masks.sky,
+                    plan.sky.exposure_ev,
+                    0,
+                    plan.sky.saturation,
                 )
-                applied.append("masked subject adjustment")
-            else:
-                skipped.append("subject: confidence below safe threshold")
-        if plan.background.enabled:
-            if masks.confidence["background"] >= 0.45:
-                result = _local_adjust(
-                    result,
-                    masks.background,
-                    plan.background.exposure_ev,
-                    plan.background.contrast,
-                    plan.background.saturation,
+                warmed = np.clip(
+                    result
+                    * np.array(
+                        [
+                            1 + plan.sky.warmth * 0.35,
+                            1 + plan.sky.warmth * 0.07,
+                            1 - plan.sky.warmth * 0.32,
+                        ],
+                        np.float32,
+                    ),
+                    0,
+                    1,
                 )
-                applied.append("masked background adjustment")
+                result = _blend(result, warmed, masks.sky)
+                applied.append("masked sky tone and warmth")
             else:
-                skipped.append("background: confidence below safe threshold")
+                skipped.append("sky: confidence below safe threshold")
 
         foliage_amount = max(
             abs(plan.foliage.green_chroma),
@@ -221,14 +249,13 @@ class RetouchEngine:
             abs(plan.foliage.green_lightness),
         )
         if foliage_amount:
-            foliage_edit = _local_adjust(
+            result = _local_adjust(
                 result,
                 masks.foliage,
                 plan.foliage.green_lightness,
                 0,
                 (plan.foliage.green_chroma + plan.foliage.yellow_chroma) / 2,
             )
-            result = foliage_edit
             applied.append("masked foliage colour")
 
         result = _skin_retouch(result, masks, plan, applied, skipped)
@@ -264,6 +291,15 @@ class RetouchEngine:
             original_luma = _luma(rgb)
             shadow_guard = np.clip((0.035 - original_luma) / 0.035, 0, 1)
             result = _blend(result, rgb, shadow_guard.astype(np.float32) * 0.75)
+        return np.clip(result, 0, 1).astype(np.float32), applied, skipped
+
+    def render(
+        self, input_path: Path, output_path: Path, plan: EditPlan, *, export_masks: bool = True
+    ) -> RenderResult:
+        rgb, input_bit_depth = self.read(input_path)
+        masks = build_masks(rgb, portrait=plan.scene.category.value == "portrait")
+        warnings: list[str] = []
+        result, applied, skipped = self.render_pixels(rgb, masks, plan)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_u16 = np.clip(result * 65535 + 0.5, 0, 65535).astype(np.uint16)

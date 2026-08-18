@@ -14,6 +14,11 @@ class Mode(StrEnum):
     CREATIVE = "creative"
 
 
+class StylePreset(StrEnum):
+    GOLDEN_CINEMATIC = "golden_cinematic"
+    CUSTOM = "custom"
+
+
 class SceneCategory(StrEnum):
     PORTRAIT = "portrait"
     LANDSCAPE = "landscape"
@@ -51,15 +56,23 @@ class Shadows(StrictModel):
     warmth: Annotated[float, Field(ge=-0.20, le=0.20)] = 0
 
 
+class SkyAdjustments(StrictModel):
+    enabled: bool = False
+    exposure_ev: Annotated[float, Field(ge=-1.5, le=0.5)] = 0
+    warmth: Annotated[float, Field(ge=-0.30, le=0.80)] = 0
+    saturation: Annotated[float, Field(ge=-0.30, le=0.75)] = 0
+
+
 class LocalAdjustments(StrictModel):
     enabled: bool = False
     exposure_ev: Annotated[float, Field(ge=-1.2, le=1.0)] = 0
     contrast: Annotated[float, Field(ge=-0.25, le=0.35)] = 0
     saturation: Annotated[float, Field(ge=-0.30, le=0.20)] = 0
+    warmth: Annotated[float, Field(ge=-0.30, le=0.50)] = 0
 
 
 class Foliage(StrictModel):
-    green_lightness: Annotated[float, Field(ge=-0.30, le=0.20)] = 0
+    green_lightness: Annotated[float, Field(ge=-0.75, le=0.35)] = 0
     green_chroma: Annotated[float, Field(ge=-0.35, le=0.20)] = 0
     yellow_chroma: Annotated[float, Field(ge=-0.30, le=0.20)] = 0
 
@@ -67,7 +80,7 @@ class Foliage(StrictModel):
 class Skin(StrictModel):
     protect: bool = True
     exposure: Annotated[float, Field(ge=-0.25, le=0.35)] = 0
-    warmth: Annotated[float, Field(ge=-0.15, le=0.20)] = 0
+    warmth: Annotated[float, Field(ge=-0.15, le=0.40)] = 0
     chroma: Annotated[float, Field(ge=-0.20, le=0.15)] = 0
     texture_softening: Annotated[float, Field(ge=0, le=0.20)] = 0
 
@@ -94,6 +107,7 @@ class EditPlan(StrictModel):
     white_balance: WhiteBalance
     highlights: Highlights
     shadows: Shadows
+    sky: SkyAdjustments = Field(default_factory=SkyAdjustments)
     subject: LocalAdjustments
     background: LocalAdjustments
     foliage: Foliage
@@ -128,6 +142,7 @@ class DeltaPlan(StrictModel):
 
 class AnalysisContext(StrictModel):
     mode: Mode = Mode.TECHNICAL
+    style: StylePreset = StylePreset.GOLDEN_CINEMATIC
     intent: str = Field(default="Natural, technically correct photographic edit", max_length=2000)
     strength: Annotated[float, Field(ge=0, le=1)] = 0.5
     naturalness: Annotated[float, Field(ge=0, le=1)] = 0.8
@@ -178,6 +193,9 @@ class RetouchRequest(StrictModel):
     output_path: str = Field(min_length=1, max_length=4096)
     edit_plan: EditPlan
     export_masks: bool = True
+    style: StylePreset = StylePreset.GOLDEN_CINEMATIC
+    auto_refine: bool = True
+    refinement_passes: Annotated[int, Field(ge=0, le=6)] = 6
 
 
 class MaskArtifact(StrictModel):
@@ -193,5 +211,9 @@ class RetouchReport(StrictModel):
     applied: list[str]
     skipped: list[str]
     warnings: list[str]
+    final_plan: EditPlan
+    refinement_passes: int
+    initial_style_distance: Annotated[float, Field(ge=0)]
+    final_style_distance: Annotated[float, Field(ge=0)]
     input_bit_depth: int
     output_bit_depth: Literal[16] = 16

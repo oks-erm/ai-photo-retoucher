@@ -41,6 +41,11 @@ def _largest_components(mask: NDArray[np.uint8], count: int = 6) -> NDArray[np.u
     return result
 
 
+def _smoothstep(values: FloatImage, lower: float, upper: float) -> FloatImage:
+    scaled = np.clip((values - lower) / (upper - lower), 0, 1)
+    return (scaled * scaled * (3 - 2 * scaled)).astype(np.float32)
+
+
 def _skin_mask(rgb: FloatImage) -> NDArray[np.uint8]:
     image = np.clip(rgb * 255, 0, 255).astype(np.uint8)
     ycrcb = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)
@@ -207,12 +212,20 @@ def build_masks(rgb: FloatImage, *, portrait: bool = True) -> MaskSet:
     foliage_binary = ((hue >= 18) & (hue <= 92) & (saturation >= 35) & (value >= 18)).astype(
         np.float32
     )
-    sky_binary = ((hue >= 86) & (hue <= 132) & (saturation >= 18) & (value >= 70)).astype(
-        np.float32
-    )
     foliage = _feather(foliage_binary * (1 - subject), max(5, rgb.shape[0] // 300))
-    sky = _feather(sky_binary * (1 - subject), max(7, rgb.shape[0] // 240))
     background = np.clip(1 - subject, 0, 1).astype(np.float32)
+    # A hue threshold is unstable for pale sky: hue becomes effectively random near
+    # grey and produces islands and halos between branches.  Use a continuous
+    # bright/low-chroma likelihood instead.  Subject exclusion protects faces and
+    # white clothing, while the soft tonal selection also behaves sensibly for
+    # overcast and golden skies and bright background bokeh.
+    brightness = _smoothstep(value, 42, 190)
+    low_chroma = 1 - _smoothstep(saturation, 58, 185)
+    sky_likelihood = brightness * (0.30 + 0.70 * low_chroma)
+    sky = _feather(
+        sky_likelihood.astype(np.float32) * background,
+        max(3, rgb.shape[0] // 520),
+    )
     return MaskSet(
         subject=subject,
         background=background,

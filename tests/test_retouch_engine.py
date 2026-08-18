@@ -80,3 +80,51 @@ def test_low_confidence_mask_is_not_silently_applied(
     assert "subject: confidence below safe threshold" in result.skipped
     assert "background: confidence below safe threshold" in result.skipped
     assert "skin: no reliable skin region detected" in result.skipped
+
+
+def test_sky_plan_is_rendered_through_its_mask(plan: EditPlan) -> None:
+    height, width = 48, 72
+    rgb = np.full((height, width, 3), (0.55, 0.62, 0.72), np.float32)
+    empty = np.zeros((height, width), np.float32)
+    sky = np.zeros_like(empty)
+    sky[:, width // 2 :] = 1
+    masks = MaskSet(
+        subject=empty,
+        background=np.ones_like(empty),
+        skin=empty,
+        face=empty,
+        foliage=empty,
+        sky=sky,
+        confidence={
+            "subject": 0,
+            "background": 0,
+            "skin": 0,
+            "face": 0,
+            "foliage": 0,
+            "sky": 0.95,
+        },
+    )
+    sky_plan = plan.model_copy(
+        update={
+            "global_": plan.global_.model_copy(
+                update={"exposure_ev": 0, "contrast": 0, "black_depth": 0}
+            ),
+            "highlights": plan.highlights.model_copy(update={"recovery": 0, "warmth": 0}),
+            "shadows": plan.shadows.model_copy(update={"lift": 0, "warmth": 0}),
+            "subject": plan.subject.model_copy(update={"enabled": False}),
+            "background": plan.background.model_copy(update={"enabled": False}),
+            "skin": plan.skin.model_copy(
+                update={"exposure": 0, "warmth": 0, "chroma": 0, "texture_softening": 0}
+            ),
+            "sharpening": plan.sharpening.model_copy(update={"amount": 0}),
+            "denoise": plan.denoise.model_copy(update={"strength": 0}),
+            "sky": plan.sky.model_copy(
+                update={"enabled": True, "exposure_ev": -1, "warmth": 0.2, "saturation": 0.1}
+            ),
+        }
+    )
+
+    rendered, applied, _ = RetouchEngine().render_pixels(rgb, masks, sky_plan)
+
+    assert rendered[:, width // 2 :].mean() < rendered[:, : width // 2].mean()
+    assert "masked sky tone and warmth" in applied

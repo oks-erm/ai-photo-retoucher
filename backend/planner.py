@@ -3,7 +3,7 @@ from pathlib import Path
 
 from backend.image_analysis import prepare_preview
 from backend.openai_client import VisionPlannerClient
-from backend.schemas import AnalysisContext, DeltaPlan, EditPlan
+from backend.schemas import AnalysisContext, DeltaPlan, EditPlan, StylePreset
 
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -21,6 +21,7 @@ class Planner:
         request = {
             "intent": context.intent,
             "mode": context.mode,
+            "style": context.style,
             "strength": context.strength,
             "naturalness": context.naturalness,
             "protections": {
@@ -33,9 +34,12 @@ class Planner:
             "current_state": context.current_state,
             "statistics": statistics,
         }
+        instructions = _prompt(context.mode.value)
+        if context.style is StylePreset.GOLDEN_CINEMATIC:
+            instructions += "\n\n" + _prompt("golden_cinematic")
         return await self._client.parse(
             schema=EditPlan,
-            instructions=_prompt(context.mode.value),
+            instructions=instructions,
             prompt=json.dumps(request, separators=(",", ":"), default=str),
             images=[preview],
         )
