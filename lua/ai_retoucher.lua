@@ -34,15 +34,16 @@ local function api_available()
   return os.execute("curl --connect-timeout 1 --max-time 2 --fail --silent "
     .. quote(API .. "/health") .. " >/dev/null 2>&1") == true
 end
-local function render(image, extension, options)
+local function render(image, extension, export_options, core_options)
   local source, output = image.path .. "/" .. image.filename, os.tmpname() .. extension
   local config_dir = os.tmpname() .. "-darktable-config"
   if os.execute("mkdir -p " .. quote(config_dir)) ~= true then
     return nil, "could not create isolated Darktable configuration"
   end
   local command = quote(darktable_cli()) .. " " .. quote(source) .. " " .. quote(output)
-    .. " " .. options .. " --core --configdir " .. quote(config_dir)
-    .. " --library :memory: >/tmp/darktable-ai-retoucher-export.log 2>&1"
+    .. " " .. export_options .. " --core --configdir " .. quote(config_dir)
+    .. " --library :memory: " .. (core_options or "")
+    .. " >/tmp/darktable-ai-retoucher-export.log 2>&1"
   local ok = os.execute(command) == true
   os.execute("rm -rf " .. quote(config_dir))
   if not ok then
@@ -52,11 +53,12 @@ local function render(image, extension, options)
   return output
 end
 local function render_preview(image)
-  return render(image, ".jpg", "--width 2048 --height 2048 --hq false")
+  return render(image, ".jpg", "--width 2048 --height 2048 --hq false --out-ext jpg")
 end
 local function render_working_tiff(image)
   return render(image, ".tif",
-    "--width 0 --height 0 --hq true --conf plugins/imageio/format/tiff/bpp=16")
+    "--width 0 --height 0 --hq true --out-ext tif",
+    "--conf plugins/imageio/format/tiff/bpp=16")
 end
 local function request_file(command)
   local response = os.tmpname()

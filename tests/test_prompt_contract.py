@@ -48,6 +48,11 @@ def test_lua_bridge_uses_full_resolution_local_render() -> None:
     assert 'API .. "/v1/retouch"' in text
     assert "plugins/imageio/format/tiff/bpp=16" in text
     assert "--width 0 --height 0 --hq true" in text
+    assert '"--width 0 --height 0 --hq true --out-ext tif",' in text
+    assert '"--conf plugins/imageio/format/tiff/bpp=16")' in text
+    assert 'export_options .. " --core --configdir "' in text
+    assert '" --library :memory: " .. (core_options or "")' in text
+    assert '" " .. options .. " --core' not in text
     assert "dt.database.import" in text
     assert "pcall(dt.gui.action" not in text
 
