@@ -1,79 +1,76 @@
 # Darktable AI Retoucher
 
-A vision-guided, non-destructive editing service for Darktable 5.6+. A reduced preview is analysed by an OpenAI vision model, the response is constrained to a Pydantic `EditPlan`, and deterministic code maps semantic photographic controls to an allow-listed Darktable operation manifest. The model never emits Lua or executable module settings.
+A one-click, vision-guided retouching panel for Darktable 5.6+. It renders a temporary reduced preview locally, asks an OpenAI vision model for a strictly validated edit plan, and applies allow-listed controls to the open Darkroom image. RAW files never leave the Mac.
+
+## macOS: install once
+
+Requirements: macOS, Darktable in `/Applications`, [uv](https://docs.astral.sh/uv/), and an OpenAI API key. No separate architecture or local AI model is required; Apple Silicon and Intel Macs use the same setup.
+
+```bash
+git clone https://github.com/oks-erm/ai-photo-retoucher.git
+cd ai-photo-retoucher
+cp .env.example .env
+# Open .env and set OPENAI_API_KEY
+bash scripts/install_macos.sh
+```
+
+Restart Darktable after the installer finishes. The installer copies the Lua panel and registers a macOS LaunchAgent, so the local API starts automatically at login and restarts if it exits. You do not need to run `uv run ai-retoucher` manually afterward.
+
+## Retouch a photo
+
+1. Open exactly one photo in **Darkroom**.
+2. In **AI Retoucher** on the right, choose Technical, Portrait, or Creative and optionally enter your intent.
+3. Click **Analyse & Apply**.
+4. Optionally click **Refine once** for a model critique, or **Revert AI Retouch** to restore the captured values.
+
+Enable **Review before applying** if you want to see the model's summary before pressing **Apply reviewed plan**. Preview rendering and temporary-file cleanup are automatic.
 
 ## What is implemented
 
-- Loopback-only FastAPI service with `/v1/analyse`, `/v1/critique`, `/v1/apply`, `/v1/revert`, and `/health`.
-- Async OpenAI Responses API integration with Pydantic Structured Outputs and image inputs.
-- Strict, bounded `EditPlan` and `DeltaPlan` contracts. Unknown fields and unsafe ranges fail before application.
-- Objective preview statistics (luminance percentiles and clipping fractions), 2048 px maximum analysis preview, and no RAW upload.
-- Deterministic mappings for exposure, white balance, tone, colour, foliage, denoise, sharpen, subject, and background operations.
-- Mask-confidence gate: all local subject/background edits are skipped below the configured threshold.
-- Transactional session records and XMP snapshot restoration for revert.
-- Thin Darktable Lua panel that applies supported controls to the current Darkroom image.
-- Unit tests for schema safety, mapping, prompts, and session storage.
+- Loopback-only FastAPI service with `/v1/analyse`, `/v1/critique`, `/v1/apply`, `/v1/revert`, `/health`, `/docs`, and a useful `/` status response.
+- OpenAI Responses API with Pydantic Structured Outputs, bounded values, objective preview statistics, and `store=False`.
+- Automatic 2048 px preview rendering through the `darktable-cli` bundled with the macOS app; only that JPEG preview is sent to OpenAI.
+- Direct Darktable application of exposure, global contrast, saturation, and vibrance through the documented shortcut-action API.
+- Optional one-pass visual critique and exposure refinement.
+- Per-control snapshots, session records, XMP snapshot restoration, and one-click revert.
+- macOS installer/uninstaller and automatic backend startup.
+- Deterministic mappings for additional white balance, tone, foliage, denoise, sharpen, subject, and background operations, with mask-confidence safety gates.
 
-The Lua bridge applies global exposure, contrast, saturation, and vibrance directly through Darktable's documented shortcut-action API. Every value is snapshotted before application so **Revert AI Retouch** restores it. More complex controls (white-balance chromatic adaptation, tone-equalizer bands, masks, foliage hue ranges, denoise and diffuse/sharpen parameters) remain in the validated operation manifest until their Darktable 5.6 action paths and units are calibrated. Unsupported controls are reported rather than approximated unsafely.
+Complex controls whose Darktable 5.6 action units have not been calibrated—white-balance chromatic adaptation, tone-equalizer bands, masks, foliage hue ranges, denoise, and diffuse/sharpen—remain validated in the operation manifest but are skipped by the Lua executor rather than guessed. Face/skin masking and pixel-level healing are not performed.
 
-## Requirements
+## Service and troubleshooting
 
-- Python 3.12+
-- Darktable 5.6+ with Lua enabled
-- `curl` for the Lua bridge
-- An OpenAI API key for analysis and critique
-
-## Install and run
+The backend listens only on `http://127.0.0.1:8765`. Check it with:
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
-cp .env.example .env
-# Add OPENAI_API_KEY to .env
-ai-retoucher
+curl http://127.0.0.1:8765/health
+open http://127.0.0.1:8765/docs
 ```
 
-The service listens only on `127.0.0.1:8765`. Open `http://127.0.0.1:8765/docs` for the local API schema.
+Logs are in `~/Library/Logs/darktable-ai-retoucher/`. Automatic preview errors are written to `/tmp/darktable-ai-retoucher-export.log`.
 
-## Darktable integration
+To run the backend in a terminal instead, unload the LaunchAgent with `bash scripts/uninstall_macos.sh`, reinstall the Lua file if desired, then run `uv run ai-retoucher` from this project. The warning about an unrelated active `VIRTUAL_ENV` is harmless; `deactivate` first if you want to remove it.
 
-1. Copy `lua/ai_retoucher.lua` into `~/.config/darktable/lua/`.
-2. Add `require "ai_retoucher"` to `~/.config/darktable/luarc`.
-3. Start the Python service before Darktable.
-4. Export the current Darkroom rendering as a JPEG or PNG, and set the Darktable preference `ai_retoucher/preview_path` to that path.
-5. Open exactly one image in **Darkroom**, choose a mode and protections, analyse, review the plan, then apply. Applying from Lighttable is rejected because processing-control actions are only safe in Darkroom.
+## Privacy and safety
 
-The preview export step is explicit in this first release because the Lua API does not expose one stable current-pipeline preview export method across the supported builds. The final image remains the original RAW plus Darktable/XMP history; the service does not rewrite it.
-
-## API examples
-
-Analyse:
-
-```bash
-curl -F image=@preview.jpg \
-  -F 'context={"mode":"portrait","intent":"warm natural outdoor portrait","strength":0.6,"naturalness":0.9}' \
-  http://127.0.0.1:8765/v1/analyse
-```
-
-Apply accepts an `image_id`, optional image/XMP paths, the validated `edit_plan`, and optional `mask_confidence`. Revert accepts the returned `session_id`.
-
-## Privacy and failure behavior
-
-- Only resized JPEG previews are sent to OpenAI; RAW files and XMP files remain local.
-- API responses are requested with `store=False`.
-- The service stores operation/session JSON locally with owner-only permissions and no pixels unless a future debug workflow explicitly adds them.
-- Missing API credentials disable analysis but leave health, deterministic mapping/application, revert, and Darktable itself usable.
-- Invalid plans, oversized uploads, unsupported media, and low-confidence masks fail closed.
+- RAW and XMP files stay local; only a resized JPEG preview is uploaded for analysis.
+- The model cannot emit Lua or executable module settings.
+- Invalid plans, unsafe ranges, unsupported media, oversized previews, low-confidence masks, and unsupported Darktable controls fail closed.
+- Darktable remains non-destructive: edits live in its history/XMP, and the panel snapshots values before changing them.
 
 ## Development
 
 ```bash
-pytest
-ruff check .
+uv sync --extra dev
+uv run pytest
+uv run ruff check .
 ```
 
-The next implementation step is calibrating the remaining Darktable-5.6 action paths and implementing subject-mask import. Face/skin masking and pixel-level healing remain intentionally out of scope.
+## Uninstall on macOS
+
+```bash
+bash scripts/uninstall_macos.sh
+```
 
 ## License
 
