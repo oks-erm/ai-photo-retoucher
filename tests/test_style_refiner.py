@@ -3,7 +3,13 @@ import pytest
 
 from backend.retouch.engine import RetouchEngine
 from backend.retouch.masks import MaskSet
-from backend.retouch.style import StyleRefiner
+from backend.retouch.style import (
+    RegionMetrics,
+    StyleMetrics,
+    StyleRefiner,
+    StyleTargets,
+    _adjust_plan,
+)
 from backend.schemas import EditPlan, StylePreset
 
 
@@ -145,3 +151,37 @@ def test_named_presets_render_distinct_pixels(plan: EditPlan, monkeypatch) -> No
         for right in outputs[index + 1 :]
     ]
     assert min(pairwise_differences) > 0.004
+
+
+def test_internal_refinement_respects_public_subject_safety_contract(plan: EditPlan) -> None:
+    base = RegionMetrics(luminance=0.4, saturation=0.4, warmth=0)
+    current = StyleMetrics(
+        global_=base,
+        subject=RegionMetrics(luminance=0.8, saturation=0.8, warmth=0),
+        background=base,
+        skin=base,
+        foliage=base,
+        sky=base,
+    )
+    target = StyleTargets(
+        metrics=StyleMetrics(
+            global_=base,
+            subject=RegionMetrics(luminance=0.1, saturation=0.1, warmth=0),
+            background=base,
+            skin=base,
+            foliage=base,
+            sky=base,
+        ),
+        active=frozenset({"global", "subject", "background"}),
+    )
+    boundary_plan = plan.model_copy(
+        update={
+            "subject": plan.subject.model_copy(update={"exposure_ev": -0.9, "saturation": -0.19})
+        }
+    )
+
+    adjusted = _adjust_plan(boundary_plan, current, target)
+
+    assert adjusted.subject.exposure_ev == -1.0
+    assert adjusted.subject.saturation == -0.20
+    assert EditPlan.model_validate(adjusted.model_dump(by_alias=True)) == adjusted

@@ -344,13 +344,13 @@ def _adjust_plan(plan: EditPlan, current: StyleMetrics, target: StyleTargets) ->
             "exposure_ev": _clamp(
                 plan.subject.exposure_ev
                 + _exposure_correction(current.subject.luminance, target.metrics.subject.luminance),
-                -1.2,
+                -1.0,
                 1.0,
             ),
             "saturation": _clamp(
                 plan.subject.saturation
                 + (target.metrics.subject.saturation - current.subject.saturation) * 0.55,
-                -0.30,
+                -0.20,
                 0.20,
             ),
             "warmth": _clamp(
@@ -534,4 +534,5 @@ class StyleRefiner:
                 completed -= 1
                 break
             current_plan, rendered, distance = candidate, candidate_render, candidate_distance
-        return StyleRefinement(current_plan, completed, initial_distance, distance)
+        validated_plan = EditPlan.model_validate(current_plan.model_dump(by_alias=True))
+        return StyleRefinement(validated_plan, completed, initial_distance, distance)
