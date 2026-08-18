@@ -28,6 +28,8 @@ def test_lua_bridge_is_one_click_and_renders_its_own_preview() -> None:
     assert "darktable-cli" in text
     assert 'API .. "/v1/critique"' in text
     assert "preview_path" not in text
+    assert '" --configdir " .. quote(config_dir)' in text
+    assert '" --library :memory:"' in text
 
 
 def test_lua_sliders_use_darktable_supported_bounds() -> None:
