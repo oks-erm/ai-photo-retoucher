@@ -51,10 +51,17 @@ local function darktable_cli()
 end
 local function render_preview(image)
   local source, output = image.path .. "/" .. image.filename, os.tmpname() .. ".jpg"
+  local config_dir = os.tmpname() .. "-darktable-config"
+  if os.execute("mkdir -p " .. quote(config_dir)) ~= true then
+    return nil, "could not create isolated preview configuration"
+  end
   local command = quote(darktable_cli()) .. " " .. quote(source) .. " " .. quote(output)
-    .. " --width 2048 --height 2048 --hq false --core --library :memory:"
+    .. " --width 2048 --height 2048 --hq false --core"
+    .. " --configdir " .. quote(config_dir) .. " --library :memory:"
     .. " >/tmp/darktable-ai-retoucher-export.log 2>&1"
-  if os.execute(command) ~= true then remove_file(output); return nil,
+  local ok = os.execute(command) == true
+  os.execute("rm -rf " .. quote(config_dir))
+  if not ok then remove_file(output); return nil,
     "preview render failed; see /tmp/darktable-ai-retoucher-export.log" end
   return output
 end
