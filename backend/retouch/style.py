@@ -185,8 +185,28 @@ def _seed_style(plan: EditPlan, style: StylePreset, light_direction: str) -> Edi
     if style is StylePreset.GOLDEN_CINEMATIC:
         return plan.model_copy(
             update={
+                "white_balance": plan.white_balance.model_copy(
+                    update={"temperature_delta_k": 280, "tint_delta": 0.0}
+                ),
+                "global_": plan.global_.model_copy(
+                    update={
+                        "contrast": 0.10,
+                        "black_depth": 0.08,
+                        "saturation": -0.02,
+                        "vibrance": 0.05,
+                    }
+                ),
+                "highlights": plan.highlights.model_copy(update={"warmth": 0.12}),
+                "shadows": plan.shadows.model_copy(update={"warmth": 0.02, "tint": 0.0}),
+                "background": plan.background.model_copy(
+                    update={"enabled": True, "saturation": -0.08, "warmth": -0.03}
+                ),
+                "foliage": plan.foliage.model_copy(
+                    update={"green_lightness": -0.18, "green_chroma": -0.12, "yellow_chroma": -0.08}
+                ),
+                "skin": plan.skin.model_copy(update={"warmth": 0.10}),
                 "atmosphere": plan.atmosphere.model_copy(
-                    update={"bloom": max(plan.atmosphere.bloom, 0.035)}
+                    update={"bloom": 0.04, "edge_darkening": 0.10}
                 )
             }
         )
@@ -195,20 +215,31 @@ def _seed_style(plan: EditPlan, style: StylePreset, light_direction: str) -> Edi
             update={
                 "global_": plan.global_.model_copy(
                     update={
-                        "black_depth": min(plan.global_.black_depth, -0.04),
-                        "saturation": min(plan.global_.saturation, -0.05),
+                        "black_depth": -0.05,
+                        "saturation": -0.08,
+                        "vibrance": 0.0,
                     }
+                ),
+                "white_balance": plan.white_balance.model_copy(
+                    update={"temperature_delta_k": 120, "tint_delta": -0.01}
                 ),
                 "highlights": plan.highlights.model_copy(
                     update={
                         "recovery": max(plan.highlights.recovery, 0.32),
-                        "warmth": max(plan.highlights.warmth, 0.08),
+                        "warmth": 0.10,
                         "softness": max(plan.highlights.softness, 0.16),
                     }
                 ),
                 "shadows": plan.shadows.model_copy(
-                    update={"warmth": min(plan.shadows.warmth, -0.04)}
+                    update={"warmth": -0.06, "tint": -0.04}
                 ),
+                "background": plan.background.model_copy(
+                    update={"enabled": True, "saturation": -0.12, "warmth": -0.06}
+                ),
+                "foliage": plan.foliage.model_copy(
+                    update={"green_lightness": -0.08, "green_chroma": -0.18, "yellow_chroma": -0.14}
+                ),
+                "skin": plan.skin.model_copy(update={"warmth": 0.10}),
                 "atmosphere": plan.atmosphere.model_copy(
                     update={
                         "bloom": max(plan.atmosphere.bloom, 0.075),
@@ -224,24 +255,29 @@ def _seed_style(plan: EditPlan, style: StylePreset, light_direction: str) -> Edi
             update={
                 "global_": plan.global_.model_copy(
                     update={
-                        "exposure_ev": max(plan.global_.exposure_ev, 0.08),
-                        "contrast": min(plan.global_.contrast, -0.08),
-                        "black_depth": min(plan.global_.black_depth, -0.14),
-                        "saturation": min(plan.global_.saturation, -0.10),
+                        "exposure_ev": max(plan.global_.exposure_ev, 0.12),
+                        "contrast": -0.12,
+                        "black_depth": -0.16,
+                        "saturation": -0.12,
+                        "vibrance": -0.04,
                     }
                 ),
                 "white_balance": plan.white_balance.model_copy(
-                    update={"tint_delta": max(plan.white_balance.tint_delta, 0.025)}
+                    update={"temperature_delta_k": 180, "tint_delta": 0.04}
                 ),
                 "highlights": plan.highlights.model_copy(
                     update={"recovery": max(plan.highlights.recovery, 0.52), "softness": 0.28}
                 ),
                 "shadows": plan.shadows.model_copy(
-                    update={"lift": max(plan.shadows.lift, 0.16), "tint": 0.12}
+                    update={"lift": max(plan.shadows.lift, 0.18), "warmth": 0.01, "tint": 0.14}
                 ),
                 "background": plan.background.model_copy(
-                    update={"enabled": True, "contrast": min(plan.background.contrast, -0.12)}
+                    update={"enabled": True, "contrast": -0.12, "saturation": -0.16, "warmth": 0.01}
                 ),
+                "foliage": plan.foliage.model_copy(
+                    update={"green_lightness": 0.02, "green_chroma": -0.22, "yellow_chroma": -0.12}
+                ),
+                "skin": plan.skin.model_copy(update={"warmth": 0.08, "chroma": -0.03}),
                 "sharpening": plan.sharpening.model_copy(
                     update={"amount": min(plan.sharpening.amount, 0.06)}
                 ),
@@ -260,21 +296,29 @@ def _seed_style(plan: EditPlan, style: StylePreset, light_direction: str) -> Edi
             update={
                 "global_": plan.global_.model_copy(
                     update={
-                        "contrast": max(plan.global_.contrast, 0.08),
-                        "black_depth": max(plan.global_.black_depth, 0.06),
-                        "vibrance": max(plan.global_.vibrance, 0.06),
+                        "contrast": 0.12,
+                        "black_depth": 0.08,
+                        "saturation": 0.02,
+                        "vibrance": 0.10,
                     }
                 ),
+                "white_balance": plan.white_balance.model_copy(
+                    update={"temperature_delta_k": 40, "tint_delta": -0.015}
+                ),
+                "highlights": plan.highlights.model_copy(update={"warmth": 0.14}),
                 "shadows": plan.shadows.model_copy(
-                    update={"warmth": min(plan.shadows.warmth, -0.08)}
+                    update={"warmth": -0.10, "tint": -0.08}
                 ),
                 "subject": plan.subject.model_copy(
-                    update={"enabled": True, "contrast": max(plan.subject.contrast, 0.05)}
+                    update={"enabled": True, "contrast": 0.08, "warmth": 0.12}
                 ),
                 "background": plan.background.model_copy(
-                    update={"enabled": True, "contrast": max(plan.background.contrast, 0.06)}
+                    update={"enabled": True, "contrast": 0.10, "saturation": 0.04, "warmth": -0.08}
                 ),
-                "skin": plan.skin.model_copy(update={"warmth": max(plan.skin.warmth, 0.12)}),
+                "foliage": plan.foliage.model_copy(
+                    update={"green_lightness": -0.10, "green_chroma": 0.10, "yellow_chroma": -0.08}
+                ),
+                "skin": plan.skin.model_copy(update={"warmth": 0.14, "chroma": 0.03}),
                 "atmosphere": plan.atmosphere.model_copy(
                     update={
                         "bloom": max(plan.atmosphere.bloom, 0.045),
@@ -288,26 +332,31 @@ def _seed_style(plan: EditPlan, style: StylePreset, light_direction: str) -> Edi
             update={
                 "white_balance": plan.white_balance.model_copy(
                     update={
-                        "temperature_delta_k": min(plan.white_balance.temperature_delta_k, -320)
+                        "temperature_delta_k": -520,
+                        "tint_delta": -0.025,
                     }
                 ),
                 "global_": plan.global_.model_copy(
                     update={
-                        "contrast": max(plan.global_.contrast, 0.10),
-                        "black_depth": max(plan.global_.black_depth, 0.06),
-                        "saturation": min(plan.global_.saturation, -0.04),
+                        "contrast": 0.12,
+                        "black_depth": 0.09,
+                        "saturation": -0.08,
+                        "vibrance": -0.02,
                     }
                 ),
                 "shadows": plan.shadows.model_copy(
-                    update={"warmth": min(plan.shadows.warmth, -0.14)}
+                    update={"warmth": -0.16, "tint": -0.08}
                 ),
                 "subject": plan.subject.model_copy(
-                    update={"enabled": True, "warmth": max(plan.subject.warmth, 0.24)}
+                    update={"enabled": True, "warmth": 0.28}
                 ),
                 "background": plan.background.model_copy(
-                    update={"enabled": True, "warmth": min(plan.background.warmth, -0.15)}
+                    update={"enabled": True, "saturation": -0.10, "warmth": -0.22}
                 ),
-                "skin": plan.skin.model_copy(update={"warmth": max(plan.skin.warmth, 0.20)}),
+                "foliage": plan.foliage.model_copy(
+                    update={"green_lightness": -0.20, "green_chroma": -0.05, "yellow_chroma": -0.12}
+                ),
+                "skin": plan.skin.model_copy(update={"warmth": 0.22}),
                 "atmosphere": plan.atmosphere.model_copy(
                     update={
                         "directional_haze": max(plan.atmosphere.directional_haze, 0.065),
@@ -318,6 +367,40 @@ def _seed_style(plan: EditPlan, style: StylePreset, light_direction: str) -> Edi
             }
         )
     return plan
+
+
+def _neutralise_model_style(plan: EditPlan) -> EditPlan:
+    """Keep scene corrections, but remove the paid plan's preset contamination."""
+    return plan.model_copy(
+        update={
+            "global_": plan.global_.model_copy(
+                update={"black_depth": 0.0, "saturation": 0.0, "vibrance": 0.0}
+            ),
+            "white_balance": plan.white_balance.model_copy(
+                update={"temperature_delta_k": 0, "tint_delta": 0.0}
+            ),
+            "highlights": plan.highlights.model_copy(update={"warmth": 0.0}),
+            "shadows": plan.shadows.model_copy(update={"warmth": 0.0, "tint": 0.0}),
+            "subject": plan.subject.model_copy(update={"saturation": 0.0, "warmth": 0.0}),
+            "background": plan.background.model_copy(update={"saturation": 0.0, "warmth": 0.0}),
+            "sky": plan.sky.model_copy(update={"enabled": False, "warmth": 0.0, "saturation": 0.0}),
+            "foliage": plan.foliage.model_copy(
+                update={"green_lightness": 0.0, "green_chroma": 0.0, "yellow_chroma": 0.0}
+            ),
+            "skin": plan.skin.model_copy(update={"warmth": 0.0, "chroma": 0.0}),
+            "atmosphere": plan.atmosphere.model_copy(
+                update={
+                    "bloom": 0.0,
+                    "halation": 0.0,
+                    "grain": 0.0,
+                    "background_softness": 0.0,
+                    "directional_haze": 0.0,
+                    "edge_darkening": 0.0,
+                    "light_direction": "none",
+                }
+            ),
+        }
+    )
 
 
 def style_distance(current: StyleMetrics, target: StyleTargets) -> float:
@@ -514,8 +597,10 @@ class StyleRefiner:
         preview = _preview(rgb)
         masks = build_masks(preview, portrait=plan.scene.category.value == "portrait")
         targets = preset_targets(measure_style(preview, masks), masks, style)
-        current_plan = _seed_style(plan, style, _infer_light_direction(preview))
-        rendered, _, _ = self._engine.render_pixels(preview, masks, current_plan)
+        current_plan = _seed_style(
+            _neutralise_model_style(plan), style, _infer_light_direction(preview)
+        )
+        rendered, _, _ = self._engine.render_pixels(preview, masks, current_plan, style=style)
         distance = style_distance(measure_style(rendered, masks), targets)
         initial_distance = distance
         completed = 0
@@ -528,7 +613,9 @@ class StyleRefiner:
                 measure_style(rendered, masks),
                 targets,
             )
-            candidate_render, _, _ = self._engine.render_pixels(preview, masks, candidate)
+            candidate_render, _, _ = self._engine.render_pixels(
+                preview, masks, candidate, style=style
+            )
             candidate_distance = style_distance(measure_style(candidate_render, masks), targets)
             if candidate_distance >= distance - 0.002:
                 completed -= 1

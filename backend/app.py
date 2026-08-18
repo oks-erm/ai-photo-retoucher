@@ -171,6 +171,7 @@ async def render_retouch(request: Request, body: RetouchRequest) -> RetouchRepor
             output_path,
             refinement.plan,
             export_masks=body.export_masks,
+            style=body.style,
         )
     except (OSError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

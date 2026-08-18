@@ -142,7 +142,7 @@ def test_named_presets_render_distinct_pixels(plan: EditPlan, monkeypatch) -> No
             style=style,
             maximum_passes=2,
         )
-        rendered, _, _ = engine.render_pixels(rgb, masks, refinement.plan)
+        rendered, _, _ = engine.render_pixels(rgb, masks, refinement.plan, style=style)
         outputs.append(rendered)
 
     pairwise_differences = [
@@ -150,7 +150,43 @@ def test_named_presets_render_distinct_pixels(plan: EditPlan, monkeypatch) -> No
         for index, left in enumerate(outputs)
         for right in outputs[index + 1 :]
     ]
-    assert min(pairwise_differences) > 0.004
+    assert min(pairwise_differences) > 0.012
+
+
+def test_saved_golden_plan_is_neutralised_before_other_preset(
+    plan: EditPlan, monkeypatch
+) -> None:
+    rgb, masks = _portrait_fixture()
+    monkeypatch.setattr("backend.retouch.style.build_masks", lambda *_args, **_kwargs: masks)
+    golden_contaminated = plan.model_copy(
+        update={
+            "white_balance": plan.white_balance.model_copy(
+                update={"temperature_delta_k": 1200, "tint_delta": 0.12}
+            ),
+            "highlights": plan.highlights.model_copy(update={"warmth": 0.28}),
+            "background": plan.background.model_copy(update={"warmth": 0.45}),
+        }
+    )
+
+    result = StyleRefiner(RetouchEngine()).refine(
+        rgb,
+        golden_contaminated,
+        style=StylePreset.PRERAPHAELITE_ENCHANTED,
+        maximum_passes=0,
+    )
+
+    # Zero passes is the explicit custom/debug bypass and keeps the plan unchanged.
+    assert result.plan == golden_contaminated
+
+    result = StyleRefiner(RetouchEngine()).refine(
+        rgb,
+        golden_contaminated,
+        style=StylePreset.PRERAPHAELITE_ENCHANTED,
+        maximum_passes=1,
+    )
+    assert result.plan.white_balance.temperature_delta_k < 400
+    assert result.plan.background.warmth < 0
+    assert result.plan.highlights.warmth == 0.14
 
 
 def test_internal_refinement_respects_public_subject_safety_contract(plan: EditPlan) -> None:

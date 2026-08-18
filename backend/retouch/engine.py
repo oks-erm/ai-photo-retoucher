@@ -7,7 +7,7 @@ import tifffile
 from numpy.typing import NDArray
 
 from backend.retouch.masks import MaskSet, build_masks
-from backend.schemas import EditPlan
+from backend.schemas import EditPlan, StylePreset
 
 FloatImage = NDArray[np.float32]
 
@@ -132,6 +132,75 @@ def _tint_shadows(rgb: FloatImage, amount: float) -> FloatImage:
         1,
     )
     return _blend(rgb, tinted, mask.astype(np.float32))
+
+
+@dataclass(frozen=True, slots=True)
+class PresetGrade:
+    shadow_colour: tuple[float, float, float]
+    shadow_amount: float
+    highlight_colour: tuple[float, float, float]
+    highlight_amount: float
+    foliage_hue_degrees: float
+    matte: float = 0
+
+
+PRESET_GRADES: dict[StylePreset, PresetGrade] = {
+    StylePreset.GOLDEN_CINEMATIC: PresetGrade(
+        (0.72, 0.86, 0.92), 0.025, (1.0, 0.76, 0.38), 0.085, -5
+    ),
+    StylePreset.MALICK_LUMINOUS: PresetGrade(
+        (0.66, 0.82, 0.78), 0.075, (1.0, 0.84, 0.56), 0.075, -12, 0.025
+    ),
+    StylePreset.COPPOLA_NOSTALGIC: PresetGrade(
+        (0.82, 0.70, 0.96), 0.14, (1.0, 0.78, 0.68), 0.10, -16, 0.11
+    ),
+    StylePreset.PRERAPHAELITE_ENCHANTED: PresetGrade(
+        (0.42, 0.82, 0.88), 0.14, (1.0, 0.70, 0.34), 0.12, 22, 0.01
+    ),
+    StylePreset.FAIRYTALE_TWILIGHT: PresetGrade(
+        (0.28, 0.68, 0.82), 0.22, (1.0, 0.82, 0.48), 0.12, 17
+    ),
+}
+
+
+def _colourise_luminance(rgb: FloatImage, colour: tuple[float, float, float]) -> FloatImage:
+    colour_array = np.array(colour, np.float32)
+    colour_luma = float(colour_array @ np.array([0.2126, 0.7152, 0.0722], np.float32))
+    return np.clip(_luma(rgb)[..., None] * colour_array / colour_luma, 0, 1)
+
+
+def _apply_preset_grade(
+    rgb: FloatImage, masks: MaskSet, style: StylePreset | None
+) -> FloatImage:
+    if style is None or style is StylePreset.CUSTOM:
+        return rgb
+    grade = PRESET_GRADES[style]
+    luminance = _luma(rgb)
+    shadows = np.clip((0.58 - luminance) / 0.58, 0, 1) ** 1.45
+    highlights = np.clip((luminance - 0.42) / 0.52, 0, 1) ** 1.35
+    # Protect skin from the environmental shadow colour while retaining warm
+    # directional light on faces and hands.
+    shadow_mask = shadows * np.clip(1 - masks.skin * 0.82, 0, 1)
+    result = _blend(
+        rgb,
+        _colourise_luminance(rgb, grade.shadow_colour),
+        shadow_mask.astype(np.float32) * grade.shadow_amount,
+    )
+    result = _blend(
+        result,
+        _colourise_luminance(result, grade.highlight_colour),
+        highlights.astype(np.float32) * grade.highlight_amount,
+    )
+    if grade.foliage_hue_degrees:
+        hsv = cv2.cvtColor(np.clip(result, 0, 1).astype(np.float32), cv2.COLOR_RGB2HSV)
+        hsv[..., 0] = (hsv[..., 0] + grade.foliage_hue_degrees) % 360
+        shifted = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+        result = _blend(result, shifted, masks.foliage)
+    if grade.matte:
+        low_tones = (1 - np.clip(luminance, 0, 1)) ** 2.2
+        lifted = result + (1 - result) * grade.matte * 0.24
+        result = _blend(result, lifted, low_tones.astype(np.float32))
+    return np.clip(result, 0, 1).astype(np.float32)
 
 
 def _directional_haze(rgb: FloatImage, masks: MaskSet, amount: float, direction: str) -> FloatImage:
@@ -262,7 +331,12 @@ class RetouchEngine:
         return np.clip(raw.astype(np.float32) / maximum, 0, 1), bit_depth
 
     def render_pixels(
-        self, rgb: FloatImage, masks: MaskSet, plan: EditPlan
+        self,
+        rgb: FloatImage,
+        masks: MaskSet,
+        plan: EditPlan,
+        *,
+        style: StylePreset | None = None,
     ) -> tuple[FloatImage, list[str], list[str]]:
         """Apply every executable plan field to RGB pixels using reusable masks."""
         applied: list[str] = []
@@ -380,6 +454,10 @@ class RetouchEngine:
             result = _atmosphere(result, masks, plan)
             applied.append("preset atmosphere and optical character")
 
+        if style is not None and style is not StylePreset.CUSTOM:
+            result = _apply_preset_grade(result, masks, style)
+            applied.append(f"{style.value} split tone and palette")
+
         if plan.protections.preserve_highlights:
             original_luma = _luma(rgb)
             result_luma = _luma(result)
@@ -394,12 +472,18 @@ class RetouchEngine:
         return np.clip(result, 0, 1).astype(np.float32), applied, skipped
 
     def render(
-        self, input_path: Path, output_path: Path, plan: EditPlan, *, export_masks: bool = True
+        self,
+        input_path: Path,
+        output_path: Path,
+        plan: EditPlan,
+        *,
+        export_masks: bool = True,
+        style: StylePreset | None = None,
     ) -> RenderResult:
         rgb, input_bit_depth = self.read(input_path)
         masks = build_masks(rgb, portrait=plan.scene.category.value == "portrait")
         warnings: list[str] = []
-        result, applied, skipped = self.render_pixels(rgb, masks, plan)
+        result, applied, skipped = self.render_pixels(rgb, masks, plan, style=style)
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_u16 = np.clip(result * 65535 + 0.5, 0, 65535).astype(np.uint16)
