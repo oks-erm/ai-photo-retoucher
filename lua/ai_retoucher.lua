@@ -131,9 +131,9 @@ end
 
 local ACTIONS = {
   { section="global", key="exposure_ev", path="iop/exposure/exposure", scale=1 },
-  { section="global", key="contrast", path="iop/colorbalancergb/global contrast", scale=100 },
-  { section="global", key="saturation", path="iop/colorbalancergb/global saturation", scale=100 },
-  { section="global", key="vibrance", path="iop/colorbalancergb/global vibrance", scale=100 },
+  { section="global", key="contrast", path="iop/colorbalancergb/contrast", scale=1 },
+  { section="global", key="saturation", path="iop/colorbalancergb/global saturation", scale=1 },
+  { section="global", key="vibrance", path="iop/colorbalancergb/global vibrance", scale=1 },
 }
 local function read_action(path)
   local ok, status = pcall(dt.gui.action, path, 0, "value", "set", NAN)
