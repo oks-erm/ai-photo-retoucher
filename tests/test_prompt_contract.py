@@ -30,6 +30,16 @@ def test_lua_bridge_is_one_click_and_renders_its_own_preview() -> None:
     assert "preview_path" not in text
 
 
+def test_lua_sliders_use_darktable_supported_bounds() -> None:
+    text = (Path(__file__).parents[1] / "lua" / "ai_retoucher.lua").read_text(encoding="utf-8")
+    assert "soft_min = 0" in text
+    assert "soft_max = 1" in text
+    assert "hard_min = 0" in text
+    assert "hard_max = 1" in text
+    assert 'label = "Strength", min =' not in text
+    assert 'label = "Naturalness", min =' not in text
+
+
 def test_macos_installer_registers_plugin_and_backend() -> None:
     text = (Path(__file__).parents[1] / "scripts" / "install_macos.sh").read_text(encoding="utf-8")
     assert 'require "ai_retoucher"' in text
