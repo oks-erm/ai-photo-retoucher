@@ -38,6 +38,16 @@ class SessionStore:
             raise KeyError(session_id) from error
         return json.loads(content)
 
+    async def latest(self) -> dict[str, Any]:
+        def newest_record() -> dict[str, Any]:
+            candidates = list(self._directory.glob("*.json"))
+            if not candidates:
+                raise KeyError("No saved edit plans")
+            target = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+            return json.loads(target.read_text("utf-8"))
+
+        return await asyncio.to_thread(newest_record)
+
     async def delete(self, session_id: str) -> None:
         target = self._directory / f"{session_id}.json"
         await asyncio.to_thread(target.unlink, missing_ok=True)
