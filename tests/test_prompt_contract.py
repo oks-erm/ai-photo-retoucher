@@ -18,12 +18,13 @@ def test_critique_requires_delta_plan() -> None:
 def test_lua_bridge_applies_real_darktable_actions() -> None:
     text = (Path(__file__).parents[1] / "lua" / "ai_retoucher.lua").read_text(encoding="utf-8")
     assert 'dt.gui.action, path, 0, "value", "set"' in text
-    assert "apply_values(plan, snapshot, true)" in text
+    assert "apply_values(plan, snapshot)" in text
     assert "restore(applied_state)" in text
     assert 'path="iop/colorbalancergb/contrast", scale=1' in text
     assert 'path="iop/colorbalancergb/global saturation", scale=1' in text
     assert 'path="iop/colorbalancergb/global vibrance", scale=1' in text
     assert "scale=100" not in text
+    assert "delta * action.scale * multiplier" not in text
 
 
 def test_lua_bridge_is_one_click_and_renders_its_own_preview() -> None:
