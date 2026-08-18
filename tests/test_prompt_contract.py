@@ -25,6 +25,11 @@ def test_lua_bridge_applies_real_darktable_actions() -> None:
     assert 'path="iop/colorbalancergb/global vibrance", scale=1' in text
     assert "scale=100" not in text
     assert "delta * action.scale * multiplier" not in text
+    assert 'path="iop/temperature/temperature", scale=1' in text
+    assert 'path="iop/toneequal/simple/0 EV", scale=-1' in text
+    assert 'path="iop/toneequal/simple/-4 EV", scale=1' in text
+    assert 'path="iop/denoiseprofile/strength", scale=1' in text
+    assert 'path="iop/diffuse/sharpness", scale=1' in text
 
 
 def test_lua_bridge_is_one_click_and_renders_its_own_preview() -> None:
