@@ -68,6 +68,15 @@ async def health(request: Request) -> dict[str, str | bool]:
     return {"status": "ok", "model_analysis_configured": request.app.state.planner is not None}
 
 
+@app.get("/v1/plans/latest", response_model=EditPlan)
+async def latest_plan(request: Request) -> EditPlan:
+    try:
+        record = await request.app.state.executor.latest()
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail="No saved edit plan") from error
+    return EditPlan.model_validate(record["edit_plan"])
+
+
 @app.post("/v1/analyse", response_model=EditPlan)
 async def analyse(
     request: Request,
