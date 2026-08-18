@@ -139,8 +139,18 @@ end
 local ACTIONS = {
   { section="global", key="exposure_ev", path="iop/exposure/exposure", scale=1 },
   { section="global", key="contrast", path="iop/colorbalancergb/contrast", scale=1 },
+  { section="global", key="black_depth", path="iop/toneequal/simple/-8 EV", scale=-1 },
   { section="global", key="saturation", path="iop/colorbalancergb/global saturation", scale=1 },
   { section="global", key="vibrance", path="iop/colorbalancergb/global vibrance", scale=1 },
+  { section="white_balance", key="temperature_delta_k", path="iop/temperature/temperature", scale=1 },
+  { section="highlights", key="recovery", path="iop/toneequal/simple/0 EV", scale=-1 },
+  { section="highlights", key="recovery", path="iop/toneequal/simple/-1 EV", scale=-0.7 },
+  { section="highlights", key="softness", path="iop/toneequal/simple/0 EV", scale=-0.35 },
+  { section="shadows", key="lift", path="iop/toneequal/simple/-4 EV", scale=1 },
+  { section="shadows", key="lift", path="iop/toneequal/simple/-5 EV", scale=0.8 },
+  { section="shadows", key="lift", path="iop/toneequal/simple/-6 EV", scale=0.5 },
+  { section="denoise", key="strength", path="iop/denoiseprofile/strength", scale=1 },
+  { section="sharpening", key="amount", path="iop/diffuse/sharpness", scale=1 },
 }
 local function read_action(path)
   local ok, status = pcall(dt.gui.action, path, 0, "value", "set", NAN)
@@ -196,8 +206,12 @@ local function apply_reviewed(image, preview, plan)
   local session = apply_api(image, plan); if not session then return false, "session failed" end
   local snapshot = {}; local count, message = apply_values(plan, snapshot)
   if count == 0 then revert_api(session); return false, message ~= "" and message or "no supported changes" end
+  if message ~= "" then
+    restore(snapshot); revert_api(session)
+    return false, "rolled back because a Darktable control failed: " .. message
+  end
   remove_file(original_preview); original_preview, last_plan, last_session, applied_state = preview, plan, session, snapshot
-  return true, message
+  return true, tostring(count) .. " controls applied"
 end
 
 local analyse_apply = dt.new_widget("button") {
