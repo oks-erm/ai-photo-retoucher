@@ -53,6 +53,16 @@ app = FastAPI(
 )
 
 
+@app.get("/")
+async def root(request: Request) -> dict[str, str | bool]:
+    return {
+        "name": "Darktable AI Retoucher",
+        "status": "ok",
+        "model_analysis_configured": request.app.state.planner is not None,
+        "docs": "/docs",
+    }
+
+
 @app.get("/health")
 async def health(request: Request) -> dict[str, str | bool]:
     return {"status": "ok", "model_analysis_configured": request.app.state.planner is not None}
