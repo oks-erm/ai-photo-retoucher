@@ -148,7 +148,7 @@ local function enable(path)
   local module = path:match("^(iop/[^/]+)")
   if module then pcall(dt.gui.action, module, 0, "enable", "on", 1) end
 end
-local function apply_values(values, snapshot, use_strength)
+local function apply_values(values, snapshot)
   local applied, failures = 0, {}
   for _, action in ipairs(ACTIONS) do
     local delta = number(object(values, action.section), action.key)
@@ -157,8 +157,9 @@ local function apply_values(values, snapshot, use_strength)
       local previous, err = read_action(action.path)
       if not previous then table.insert(failures, action.key .. ": " .. err) else
         if snapshot then table.insert(snapshot, { path=action.path, value=previous }) end
-        local multiplier = use_strength and strength.value or 1
-        local ok, set_err = set_action(action.path, previous + delta * action.scale * multiplier)
+        -- Strength is already part of the model request, so EditPlan values are final
+        -- deltas. Scaling them again here makes low/medium-strength edits invisible.
+        local ok, set_err = set_action(action.path, previous + delta * action.scale)
         if ok then applied = applied + 1 else table.insert(failures, action.key .. ": " .. set_err) end
       end
     end
@@ -186,7 +187,7 @@ local function analyse_current()
 end
 local function apply_reviewed(image, preview, plan)
   local session = apply_api(image, plan); if not session then return false, "session failed" end
-  local snapshot = {}; local count, message = apply_values(plan, snapshot, true)
+  local snapshot = {}; local count, message = apply_values(plan, snapshot)
   if count == 0 then revert_api(session); return false, message ~= "" and message or "no supported changes" end
   remove_file(original_preview); original_preview, last_plan, last_session, applied_state = preview, plan, session, snapshot
   return true, message
@@ -228,7 +229,7 @@ local refine = dt.new_widget("button") {
     if boolean(delta, "accepted") then summary.label = "Critic accepted the edit"; return end
     local exposure_delta = number(delta, "global_exposure_delta") or 0
     local synthetic = '{"global":{"exposure_ev":' .. tostring(exposure_delta) .. '}}'
-    local count, message = apply_values(synthetic, nil, false)
+    local count, message = apply_values(synthetic, nil)
     summary.label = count > 0 and "Refinement applied" or message
   end,
 }
