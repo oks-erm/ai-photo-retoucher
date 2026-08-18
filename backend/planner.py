@@ -7,6 +7,14 @@ from backend.schemas import AnalysisContext, DeltaPlan, EditPlan, StylePreset
 
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
 
+STYLE_PROMPTS = {
+    StylePreset.GOLDEN_CINEMATIC: "golden_cinematic",
+    StylePreset.MALICK_LUMINOUS: "malick_luminous",
+    StylePreset.COPPOLA_NOSTALGIC: "coppola_nostalgic",
+    StylePreset.PRERAPHAELITE_ENCHANTED: "preraphaelite_enchanted",
+    StylePreset.FAIRYTALE_TWILIGHT: "fairytale_twilight",
+}
+
 
 def _prompt(name: str) -> str:
     return (PROMPTS / f"{name}.md").read_text(encoding="utf-8")
@@ -35,8 +43,8 @@ class Planner:
             "statistics": statistics,
         }
         instructions = _prompt(context.mode.value)
-        if context.style is StylePreset.GOLDEN_CINEMATIC:
-            instructions += "\n\n" + _prompt("golden_cinematic")
+        if style_prompt := STYLE_PROMPTS.get(context.style):
+            instructions += "\n\n" + _prompt(style_prompt)
         return await self._client.parse(
             schema=EditPlan,
             instructions=instructions,

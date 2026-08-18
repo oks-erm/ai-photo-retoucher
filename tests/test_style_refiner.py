@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from backend.retouch.engine import RetouchEngine
 from backend.retouch.masks import MaskSet
@@ -70,3 +71,77 @@ def test_custom_style_keeps_the_model_plan_exactly(plan: EditPlan) -> None:
 
     assert result.passes == 0
     assert result.plan == plan
+
+
+@pytest.mark.parametrize(
+    ("style", "assert_signature"),
+    [
+        (
+            StylePreset.MALICK_LUMINOUS,
+            lambda result: (
+                result.plan.atmosphere.directional_haze >= 0.10
+                and result.plan.atmosphere.bloom >= 0.075
+            ),
+        ),
+        (
+            StylePreset.COPPOLA_NOSTALGIC,
+            lambda result: (
+                result.plan.atmosphere.grain >= 0.08 and result.plan.shadows.tint >= 0.12
+            ),
+        ),
+        (
+            StylePreset.PRERAPHAELITE_ENCHANTED,
+            lambda result: (
+                result.plan.atmosphere.edge_darkening >= 0.18
+                and result.plan.global_.vibrance >= 0.06
+            ),
+        ),
+        (
+            StylePreset.FAIRYTALE_TWILIGHT,
+            lambda result: (
+                result.plan.white_balance.temperature_delta_k < 0
+                and result.plan.subject.warmth >= 0.24
+            ),
+        ),
+    ],
+)
+def test_named_presets_have_distinct_local_signatures(
+    plan: EditPlan, monkeypatch, style: StylePreset, assert_signature
+) -> None:
+    rgb, masks = _portrait_fixture()
+    monkeypatch.setattr("backend.retouch.style.build_masks", lambda *_args, **_kwargs: masks)
+
+    result = StyleRefiner(RetouchEngine()).refine(
+        rgb,
+        plan,
+        style=style,
+        maximum_passes=2,
+    )
+
+    assert result.final_distance <= result.initial_distance
+    assert assert_signature(result)
+
+
+def test_named_presets_render_distinct_pixels(plan: EditPlan, monkeypatch) -> None:
+    rgb, masks = _portrait_fixture()
+    monkeypatch.setattr("backend.retouch.style.build_masks", lambda *_args, **_kwargs: masks)
+    engine = RetouchEngine()
+    outputs = []
+    for style in StylePreset:
+        if style is StylePreset.CUSTOM:
+            continue
+        refinement = StyleRefiner(engine).refine(
+            rgb,
+            plan,
+            style=style,
+            maximum_passes=2,
+        )
+        rendered, _, _ = engine.render_pixels(rgb, masks, refinement.plan)
+        outputs.append(rendered)
+
+    pairwise_differences = [
+        float(np.mean(np.abs(left - right)))
+        for index, left in enumerate(outputs)
+        for right in outputs[index + 1 :]
+    ]
+    assert min(pairwise_differences) > 0.004

@@ -15,6 +15,34 @@ def test_critique_requires_delta_plan() -> None:
     assert "do not return a replacement EditPlan" in text
 
 
+def test_all_named_style_presets_have_model_guidance() -> None:
+    prompt_dir = Path(__file__).parents[1] / "prompts"
+    for name in (
+        "golden_cinematic",
+        "malick_luminous",
+        "coppola_nostalgic",
+        "preraphaelite_enchanted",
+        "fairytale_twilight",
+    ):
+        text = (prompt_dir / f"{name}.md").read_text(encoding="utf-8").lower()
+        assert "preset" in text or "style" in text
+        assert "identity" in text
+
+
+def test_lua_exposes_every_style_without_requiring_expert_intent() -> None:
+    text = (Path(__file__).parents[1] / "lua" / "ai_retoucher.lua").read_text(encoding="utf-8")
+    for style in (
+        "golden_cinematic",
+        "malick_luminous",
+        "coppola_nostalgic",
+        "preraphaelite_enchanted",
+        "fairytale_twilight",
+        "custom",
+    ):
+        assert f'"{style}"' in text
+    assert "Apply the selected preset faithfully" in text
+
+
 def test_lua_bridge_uses_full_resolution_local_render() -> None:
     text = (Path(__file__).parents[1] / "lua" / "ai_retoucher.lua").read_text(encoding="utf-8")
     assert 'API .. "/v1/retouch"' in text
@@ -33,6 +61,7 @@ def test_lua_bridge_is_one_click_and_renders_its_own_preview() -> None:
     assert '" --library :memory:' in text
     assert 'label = "Retouch with saved plan (free)"' in text
     assert 'API .. "/v1/plans/latest"' in text
+    assert "Loading original model plan" in text
 
 
 def test_lua_sliders_use_darktable_supported_bounds() -> None:

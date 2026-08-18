@@ -71,9 +71,11 @@ end
 local function latest_plan_api()
   return request_file("curl --fail --silent --show-error " .. quote(API .. "/v1/plans/latest"))
 end
-local function output_path(image)
+local function output_path(image, style_name)
   local stem = image.filename:gsub("%.[^%.]+$", "")
-  return image.path .. "/" .. stem .. "-ai-retouched-" .. os.date("%Y%m%d-%H%M%S") .. ".tif"
+  local style_slug = style_name:gsub("_", "-")
+  return image.path .. "/" .. stem .. "-ai-" .. style_slug .. "-"
+    .. os.date("%Y%m%d-%H%M%S") .. ".tif"
 end
 local function retouch_api(image, input, output, plan, style_name)
   local payload_path = os.tmpname()
@@ -96,7 +98,14 @@ local mode = dt.new_widget("combobox") {
   label = "Mode", "Technical", "Portrait", "Creative", selected = 2,
 }
 local style = dt.new_widget("combobox") {
-  label = "Style", "Golden cinematic", "Custom intent only", selected = 1,
+  label = "Style",
+  "Golden hour cinematic",
+  "Malick — luminous natural",
+  "Coppola — nostalgic dream",
+  "Pre-Raphaelite forest",
+  "Fairytale twilight",
+  "Custom intent only",
+  selected = 1,
 }
 local intent = dt.new_widget("entry") {
   placeholder = "e.g. luminous golden-hour portrait, natural skin",
@@ -122,11 +131,18 @@ local review_first = dt.new_widget("check_button") {
   label = "Review plan before rendering", value = false,
 }
 local status = dt.new_widget("label") { label = "Ready — original RAW will not be changed" }
+local styles = {
+  "golden_cinematic",
+  "malick_luminous",
+  "coppola_nostalgic",
+  "preraphaelite_enchanted",
+  "fairytale_twilight",
+  "custom",
+}
 local function context()
   local modes = { "technical", "portrait", "creative" }
-  local styles = { "golden_cinematic", "custom" }
   local requested = intent.text ~= "" and intent.text or
-    "Natural professional retouch with balanced colour and subject separation"
+    "Apply the selected preset faithfully with natural skin and professional restraint"
   return '{"mode":' .. json_quote(modes[mode.selected])
     .. ',"style":' .. json_quote(styles[style.selected]) .. ',"intent":' .. json_quote(requested)
     .. string.format(',"strength":%.3f,"naturalness":%.3f', strength.value, naturalness.value)
@@ -144,10 +160,10 @@ local function render_plan(image, plan)
   status.label = "Exporting current edit as 16-bit TIFF…"
   local working, export_error = render_working_tiff(image)
   if not working then return false, export_error end
-  local output = output_path(image)
+  local style_name = styles[style.selected]
+  local output = output_path(image, style_name)
   status.label = "Building masks and retouching locally…"
-  local styles = { "golden_cinematic", "custom" }
-  local rendered, retouch_error = retouch_api(image, working, output, plan, styles[style.selected])
+  local rendered, retouch_error = retouch_api(image, working, output, plan, style_name)
   remove_file(working)
   if not rendered then return false, retouch_error end
   status.label = "Importing editable TIFF into Darktable…"
@@ -195,7 +211,7 @@ local render_saved = dt.new_widget("button") {
   clicked_callback = function()
     if not api_available() then status.label = "Backend is not running"; return end
     local image = selected_image(); if not image then return end
-    status.label = "Loading last plan — no OpenAI call…"
+    status.label = "Loading original model plan — no OpenAI call…"
     local plan = latest_plan_api(); if not plan then status.label = "No saved plan found"; return end
     local ok, message = render_plan(image, plan); status.label = message
     if not ok then dt.print_error("AI Retoucher: " .. message) end

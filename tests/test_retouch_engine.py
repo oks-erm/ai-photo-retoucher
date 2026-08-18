@@ -128,3 +128,52 @@ def test_sky_plan_is_rendered_through_its_mask(plan: EditPlan) -> None:
 
     assert rendered[:, width // 2 :].mean() < rendered[:, : width // 2].mean()
     assert "masked sky tone and warmth" in applied
+
+
+def test_atmosphere_is_deterministic_and_keeps_full_resolution(plan: EditPlan) -> None:
+    height, width = 64, 96
+    rgb = np.full((height, width, 3), 0.34, np.float32)
+    rgb[18:40, 35:61] = (0.82, 0.66, 0.48)
+    subject = np.zeros((height, width), np.float32)
+    subject[14:54, 30:66] = 1
+    empty = np.zeros_like(subject)
+    masks = MaskSet(
+        subject=subject,
+        background=1 - subject,
+        skin=empty,
+        face=empty,
+        foliage=empty,
+        sky=empty,
+        confidence={
+            "subject": 0.95,
+            "background": 0.95,
+            "skin": 0,
+            "face": 0,
+            "foliage": 0,
+            "sky": 0,
+        },
+    )
+    atmosphere_plan = plan.model_copy(
+        update={
+            "atmosphere": plan.atmosphere.model_copy(
+                update={
+                    "bloom": 0.12,
+                    "halation": 0.08,
+                    "grain": 0.10,
+                    "background_softness": 0.12,
+                    "directional_haze": 0.08,
+                    "edge_darkening": 0.14,
+                    "light_direction": "left",
+                }
+            )
+        }
+    )
+    engine = RetouchEngine()
+
+    first, applied, _ = engine.render_pixels(rgb, masks, atmosphere_plan)
+    second, _, _ = engine.render_pixels(rgb, masks, atmosphere_plan)
+
+    assert first.shape == rgb.shape
+    assert np.array_equal(first, second)
+    assert not np.allclose(first, rgb)
+    assert "preset atmosphere and optical character" in applied

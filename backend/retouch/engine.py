@@ -122,6 +122,92 @@ def _warm_luminance_zone(rgb: FloatImage, amount: float, highlights: bool) -> Fl
     return _blend(rgb, warmed, mask.astype(np.float32))
 
 
+def _tint_shadows(rgb: FloatImage, amount: float) -> FloatImage:
+    if not amount:
+        return rgb
+    mask = np.clip((0.55 - _luma(rgb)) / 0.55, 0, 1) ** 1.4
+    tinted = np.clip(
+        rgb * np.array([1 + amount * 0.18, 1 - amount * 0.18, 1 + amount * 0.16], np.float32),
+        0,
+        1,
+    )
+    return _blend(rgb, tinted, mask.astype(np.float32))
+
+
+def _directional_haze(rgb: FloatImage, masks: MaskSet, amount: float, direction: str) -> FloatImage:
+    if not amount or direction == "none":
+        return rgb
+    height, width = rgb.shape[:2]
+    anchors = {
+        "left": (-0.12, 0.45),
+        "right": (1.12, 0.45),
+        "top_left": (-0.08, -0.08),
+        "top_right": (1.08, -0.08),
+    }
+    anchor_x, anchor_y = anchors[direction]
+    y, x = np.mgrid[0:height, 0:width].astype(np.float32)
+    x = x / max(width - 1, 1)
+    y = y / max(height - 1, 1)
+    distance = ((x - anchor_x) ** 2 + ((y - anchor_y) * 1.25) ** 2) ** 0.5
+    falloff = np.exp(-(distance**2) / 0.22).astype(np.float32)
+    # Keep faces and pale clothing photographic; the glow belongs mainly to the air
+    # and catches only the edges of the segmented subject.
+    mask = falloff * np.clip(1 - masks.subject * 0.72, 0, 1)
+    haze_colour = np.array([1.0, 0.68, 0.28], np.float32)
+    hazed = 1 - (1 - rgb) * (1 - haze_colour * 0.55)
+    return _blend(rgb, hazed.astype(np.float32), mask * amount)
+
+
+def _atmosphere(rgb: FloatImage, masks: MaskSet, plan: EditPlan) -> FloatImage:
+    atmosphere = plan.atmosphere
+    result = rgb
+    if atmosphere.background_softness:
+        sigma = 0.8 + atmosphere.background_softness * 8
+        softened = cv2.GaussianBlur(result, (0, 0), sigma)
+        result = _blend(
+            result,
+            softened,
+            masks.background * atmosphere.background_softness * 0.72,
+        )
+    if atmosphere.bloom:
+        bright = np.clip((_luma(result) - 0.52) / 0.42, 0, 1) ** 1.5
+        source = result * bright[..., None]
+        bloom = cv2.GaussianBlur(source, (0, 0), 2.0 + atmosphere.bloom * 24)
+        result = np.clip(result + bloom * atmosphere.bloom * (1 - result), 0, 1)
+    if atmosphere.halation:
+        highlights = np.clip((_luma(result) - 0.62) / 0.32, 0, 1) ** 1.8
+        halo = cv2.GaussianBlur(highlights, (0, 0), 3.0 + atmosphere.halation * 30)
+        colour = np.array([1.0, 0.28, 0.08], np.float32)
+        result = np.clip(result + halo[..., None] * colour * atmosphere.halation * 0.10, 0, 1)
+    result = _directional_haze(
+        result,
+        masks,
+        atmosphere.directional_haze,
+        atmosphere.light_direction,
+    )
+    if atmosphere.edge_darkening:
+        height, width = result.shape[:2]
+        y, x = np.mgrid[-1 : 1 : complex(height), -1 : 1 : complex(width)]
+        radius = np.sqrt((x / 1.12) ** 2 + (y / 1.04) ** 2)
+        edge = np.clip((radius - 0.35) / 0.78, 0, 1) ** 1.7
+        strength = edge.astype(np.float32) * atmosphere.edge_darkening
+        darkened = _linear_to_srgb(_srgb_to_linear(result) * (2 ** (-1.1 * strength[..., None])))
+        # Vignetting should shape the setting, not visibly dirty the subject.
+        result = _blend(result, darkened, np.clip(1 - masks.subject * 0.65, 0, 1))
+    if atmosphere.grain:
+        height, width = result.shape[:2]
+        y, x = np.mgrid[0:height, 0:width].astype(np.float32)
+        noise = np.sin(x * 12.9898 + y * 78.233) * 43758.547
+        noise = ((noise - np.floor(noise)) - 0.5).astype(np.float32)
+        midtone_weight = 0.35 + 0.65 * (1 - np.abs(_luma(result) * 2 - 1))
+        result = np.clip(
+            result + noise[..., None] * midtone_weight[..., None] * atmosphere.grain * 0.075,
+            0,
+            1,
+        )
+    return result.astype(np.float32)
+
+
 def _skin_retouch(
     rgb: FloatImage, masks: MaskSet, plan: EditPlan, applied: list[str], skipped: list[str]
 ) -> FloatImage:
@@ -194,7 +280,8 @@ class RetouchEngine:
             applied.append("global colour intensity")
         result = _warm_luminance_zone(result, plan.highlights.warmth, True)
         result = _warm_luminance_zone(result, plan.shadows.warmth, False)
-        if plan.highlights.warmth or plan.shadows.warmth:
+        result = _tint_shadows(result, plan.shadows.tint)
+        if plan.highlights.warmth or plan.shadows.warmth or plan.shadows.tint:
             applied.append("split tonal warmth")
 
         for name, adjustment, mask in (
@@ -279,6 +366,19 @@ class RetouchEngine:
             blur = cv2.GaussianBlur(result, (0, 0), 1.2)
             result = np.clip(result + (result - blur) * plan.sharpening.amount * 1.7, 0, 1)
             applied.append("detail sharpening")
+
+        if any(
+            (
+                plan.atmosphere.bloom,
+                plan.atmosphere.halation,
+                plan.atmosphere.grain,
+                plan.atmosphere.background_softness,
+                plan.atmosphere.directional_haze,
+                plan.atmosphere.edge_darkening,
+            )
+        ):
+            result = _atmosphere(result, masks, plan)
+            applied.append("preset atmosphere and optical character")
 
         if plan.protections.preserve_highlights:
             original_luma = _luma(rgb)

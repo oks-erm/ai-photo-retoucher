@@ -84,7 +84,9 @@ async def latest_plan(request: Request) -> EditPlan:
         record = await request.app.state.executor.latest()
     except KeyError as error:
         raise HTTPException(status_code=404, detail="No saved edit plan") from error
-    return EditPlan.model_validate(record["edit_plan"])
+    # Reuse the untouched one-call model plan. This lets the photographer compare
+    # several local presets without stacking one preset's convergence onto another.
+    return EditPlan.model_validate(record.get("model_edit_plan", record["edit_plan"]))
 
 
 @app.post("/v1/analyse", response_model=EditPlan)

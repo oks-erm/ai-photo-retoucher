@@ -16,6 +16,10 @@ class Mode(StrEnum):
 
 class StylePreset(StrEnum):
     GOLDEN_CINEMATIC = "golden_cinematic"
+    MALICK_LUMINOUS = "malick_luminous"
+    COPPOLA_NOSTALGIC = "coppola_nostalgic"
+    PRERAPHAELITE_ENCHANTED = "preraphaelite_enchanted"
+    FAIRYTALE_TWILIGHT = "fairytale_twilight"
     CUSTOM = "custom"
 
 
@@ -54,6 +58,7 @@ class Highlights(StrictModel):
 class Shadows(StrictModel):
     lift: Annotated[float, Field(ge=-0.30, le=0.50)] = 0
     warmth: Annotated[float, Field(ge=-0.20, le=0.20)] = 0
+    tint: Annotated[float, Field(ge=-0.25, le=0.25)] = 0
 
 
 class SkyAdjustments(StrictModel):
@@ -93,6 +98,16 @@ class Strength(StrictModel):
     strength: Annotated[float, Field(ge=0, le=0.60)] = 0
 
 
+class Atmosphere(StrictModel):
+    bloom: Annotated[float, Field(ge=0, le=0.30)] = 0
+    halation: Annotated[float, Field(ge=0, le=0.25)] = 0
+    grain: Annotated[float, Field(ge=0, le=0.25)] = 0
+    background_softness: Annotated[float, Field(ge=0, le=0.30)] = 0
+    directional_haze: Annotated[float, Field(ge=0, le=0.25)] = 0
+    edge_darkening: Annotated[float, Field(ge=0, le=0.35)] = 0
+    light_direction: Literal["left", "right", "top_left", "top_right", "none"] = "none"
+
+
 class Protections(StrictModel):
     preserve_highlights: bool = True
     preserve_deep_shadows: bool = True
@@ -114,6 +129,7 @@ class EditPlan(StrictModel):
     skin: Skin
     sharpening: Amount
     denoise: Strength
+    atmosphere: Atmosphere = Field(default_factory=Atmosphere)
     protections: Protections
     summary: str = Field(min_length=1, max_length=1000)
 

@@ -22,19 +22,32 @@ The installer uses Python 3.12, downloads the Apache-2.0 local portrait model on
 ## Retouch one photo
 
 1. Open exactly one photo in **Darkroom**.
-2. Open **AI Retoucher** in the right panel, choose Portrait, Technical, or Creative, and leave **Golden cinematic** selected for the supplied reference look.
-3. Describe the desired result, for example:
+2. Open **AI Retoucher** in the right panel, choose Portrait, Technical, or Creative, and select a photographic preset.
+3. The intent box is optional. Use it only for a concrete exception or priority, for example:
 
-   `Luminous golden-hour maternity portrait. Lift the woman and face, keep the white dress detailed, deepen and warm the forest, mute harsh greens, natural skin and fine texture.`
+   `Prioritise the woman's face and keep the white dress detailed.`
 
 4. Set Strength around `0.65` and Naturalness around `0.85`.
 5. Click **Analyse & Retouch**.
 
-The first local render after installation can be slower while ONNX initializes. The new file is rendered at the source dimensions, named like `RVAZ4030-ai-retouched-20260818-174500.tif`, and imported into Darktable automatically. Its mask directory has the same stem plus `-masks`.
+The first local render after installation can be slower while ONNX initializes. The new file is rendered at the source dimensions, named like `RVAZ4030-ai-malick-luminous-20260818-174500.tif`, and imported into Darktable automatically. Its mask directory has the same stem plus `-masks`.
+
+## Presets
+
+| Preset | Recognizable result |
+|---|---|
+| **Golden hour cinematic** | The approved reference look: luminous warm subject, darker amber sky, deep quiet foliage and strong separation. |
+| **Malick — luminous natural** | Peach-honey skin, pale-gold highlights, olive/moss foliage, cool green-grey shadows, lifted blacks and restrained directional haze. |
+| **Coppola — nostalgic dream** | Creamy highlights, lifted faded blacks, muted yellow-green foliage, dusty-pink/lavender tonality, fine grain, bloom and small halation. |
+| **Pre-Raphaelite forest** | Warm ivory skin, emerald/blue-green foliage, preserved reds, cyan deep shadows, amber highlights and selective painterly darkness. |
+| **Fairytale twilight** | A cool blue-hour environment with warm subject light, deeper teal-green background, pale-yellow highlights and directional glow. |
+| **Custom intent only** | No preset signature or local style convergence; the model follows the written intent alone. |
+
+Preset names describe broad photographic and cinematic colour vocabularies. They do not copy a specific film frame or painting, and the pipeline never changes identity, geometry, pose or location.
 
 **Golden cinematic** is a reusable style signature measured from the supplied example, not a hardcoded recipe for that one frame. It locally aims for a brighter, warmer subject; protected white clothing and skin texture; a substantially darker background and sky; and deeper, quieter foliage. Each pass measures the current image, adjusts bounded plan values, renders again, and keeps only an improvement. Choose **Custom intent only** to apply the model's plan without this style convergence.
 
-Enable **Review plan before rendering** if you want to read the plan summary first. **Retouch with saved plan (free)** reuses the most recently rendered plan on the current photo without calling OpenAI—useful for testing or applying a consistent look.
+Enable **Review plan before rendering** if you want to read the plan summary first. After the first analysis, change the preset and click **Retouch with saved plan (free)** to create as many comparisons as you want without calling OpenAI again. The button always reloads the untouched original model plan, so styles never stack or contaminate each other.
 
 ## What is actually applied
 
@@ -44,6 +57,7 @@ Enable **Review plan before rendering** if you want to read the plan summary fir
 - soft sky/background luminance mask with bounded darkening, warmth, and saturation
 - masked green/yellow foliage lightness and chroma
 - confidence-gated skin tone, warmth, chroma, and texture-preserving bilateral smoothing
+- deterministic bloom, halation, fine grain, background softness, directional amber haze and selective edge darkening
 - edge-preserving denoise and bounded unsharp detail
 - highlight and deep-shadow protection
 - reusable full-resolution 16-bit masks, with explicit applied/skipped reporting in the session JSON

@@ -41,6 +41,68 @@ class StyleRefinement:
     final_distance: float
 
 
+@dataclass(frozen=True, slots=True)
+class RegionTargetSpec:
+    luminance_ratio: float = 1
+    saturation_ratio: float = 1
+    warmth_delta: float = 0
+    luminance_bounds: tuple[float, float] = (0.02, 0.85)
+
+
+@dataclass(frozen=True, slots=True)
+class PresetTargetSpec:
+    global_: RegionTargetSpec
+    subject: RegionTargetSpec
+    background: RegionTargetSpec
+    skin: RegionTargetSpec
+    foliage: RegionTargetSpec
+    sky: RegionTargetSpec
+
+
+PRESET_TARGETS: dict[StylePreset, PresetTargetSpec] = {
+    StylePreset.GOLDEN_CINEMATIC: PresetTargetSpec(
+        global_=RegionTargetSpec(1, 0.92, 0),
+        subject=RegionTargetSpec(1.08, 1.12, 7, (0.28, 0.58)),
+        background=RegionTargetSpec(0.61, 0.90, -1, (0.08, 0.30)),
+        skin=RegionTargetSpec(1.03, 1.18, 9, (0.36, 0.64)),
+        foliage=RegionTargetSpec(0.68, 0.81, -6, (0.06, 0.28)),
+        sky=RegionTargetSpec(0.50, 2.05, 12, (0.16, 0.42)),
+    ),
+    StylePreset.MALICK_LUMINOUS: PresetTargetSpec(
+        global_=RegionTargetSpec(0.94, 0.84, 1),
+        subject=RegionTargetSpec(1.10, 1.08, 7, (0.30, 0.64)),
+        background=RegionTargetSpec(0.78, 0.75, -3, (0.10, 0.42)),
+        skin=RegionTargetSpec(1.05, 1.12, 8, (0.38, 0.66)),
+        foliage=RegionTargetSpec(0.78, 0.70, -5, (0.07, 0.32)),
+        sky=RegionTargetSpec(0.82, 0.80, 4, (0.20, 0.58)),
+    ),
+    StylePreset.COPPOLA_NOSTALGIC: PresetTargetSpec(
+        global_=RegionTargetSpec(1.04, 0.78, 3),
+        subject=RegionTargetSpec(1.12, 0.92, 5, (0.34, 0.68)),
+        background=RegionTargetSpec(1.02, 0.68, 1, (0.16, 0.55)),
+        skin=RegionTargetSpec(1.06, 1.05, 6, (0.40, 0.68)),
+        foliage=RegionTargetSpec(1.00, 0.60, 4, (0.10, 0.38)),
+        sky=RegionTargetSpec(1.03, 0.65, 3, (0.28, 0.72)),
+    ),
+    StylePreset.PRERAPHAELITE_ENCHANTED: PresetTargetSpec(
+        global_=RegionTargetSpec(0.88, 0.96, 0),
+        subject=RegionTargetSpec(1.10, 1.12, 9, (0.30, 0.62)),
+        background=RegionTargetSpec(0.70, 0.88, -4, (0.08, 0.34)),
+        skin=RegionTargetSpec(1.05, 1.20, 10, (0.38, 0.66)),
+        foliage=RegionTargetSpec(0.72, 0.92, -6, (0.06, 0.30)),
+        sky=RegionTargetSpec(0.72, 1.25, 4, (0.18, 0.52)),
+    ),
+    StylePreset.FAIRYTALE_TWILIGHT: PresetTargetSpec(
+        global_=RegionTargetSpec(0.78, 0.82, -4),
+        subject=RegionTargetSpec(1.08, 1.05, 8, (0.28, 0.60)),
+        background=RegionTargetSpec(0.60, 0.78, -9, (0.06, 0.28)),
+        skin=RegionTargetSpec(1.03, 1.12, 9, (0.36, 0.64)),
+        foliage=RegionTargetSpec(0.62, 0.72, -10, (0.05, 0.25)),
+        sky=RegionTargetSpec(0.62, 1.15, -6, (0.15, 0.44)),
+    ),
+}
+
+
 def _clamp(value: float, lower: float, upper: float) -> float:
     return max(lower, min(upper, value))
 
@@ -70,29 +132,19 @@ def measure_style(rgb: FloatImage, masks: MaskSet) -> StyleMetrics:
     )
 
 
-def golden_cinematic_targets(source: StyleMetrics, masks: MaskSet) -> StyleTargets:
-    """Transferable ratios measured from the supplied before/after style reference.
+def preset_targets(source: StyleMetrics, masks: MaskSet, style: StylePreset) -> StyleTargets:
+    """Create scene-relative targets for a recognizable photographic preset."""
+    spec = PRESET_TARGETS[style]
 
-    The values describe relationships rather than image coordinates or absolute output
-    pixels, so they adapt to the exposure and palette of each new photograph.
-    """
-
-    def region(
-        original: RegionMetrics,
-        *,
-        luminance_ratio: float = 1,
-        saturation_ratio: float = 1,
-        warmth_delta: float = 0,
-        luminance_bounds: tuple[float, float] = (0.02, 0.85),
-    ) -> RegionMetrics:
+    def region(original: RegionMetrics, target: RegionTargetSpec) -> RegionMetrics:
         return RegionMetrics(
             luminance=_clamp(
-                original.luminance * luminance_ratio,
-                luminance_bounds[0],
-                luminance_bounds[1],
+                original.luminance * target.luminance_ratio,
+                target.luminance_bounds[0],
+                target.luminance_bounds[1],
             ),
-            saturation=_clamp(original.saturation * saturation_ratio, 0.04, 0.72),
-            warmth=_clamp(original.warmth + warmth_delta, -15, 35),
+            saturation=_clamp(original.saturation * target.saturation_ratio, 0.04, 0.72),
+            warmth=_clamp(original.warmth + target.warmth_delta, -15, 35),
         )
 
     active = {"global", "background"}
@@ -101,45 +153,171 @@ def golden_cinematic_targets(source: StyleMetrics, masks: MaskSet) -> StyleTarge
             active.add(name)
     return StyleTargets(
         metrics=StyleMetrics(
-            global_=region(source.global_, saturation_ratio=0.92),
-            subject=region(
-                source.subject,
-                luminance_ratio=1.08,
-                saturation_ratio=1.12,
-                warmth_delta=7,
-                luminance_bounds=(0.28, 0.58),
-            ),
-            background=region(
-                source.background,
-                luminance_ratio=0.61,
-                saturation_ratio=0.90,
-                warmth_delta=-1,
-                luminance_bounds=(0.08, 0.30),
-            ),
-            skin=region(
-                source.skin,
-                luminance_ratio=1.03,
-                saturation_ratio=1.18,
-                warmth_delta=9,
-                luminance_bounds=(0.36, 0.64),
-            ),
-            foliage=region(
-                source.foliage,
-                luminance_ratio=0.68,
-                saturation_ratio=0.81,
-                warmth_delta=-6,
-                luminance_bounds=(0.06, 0.28),
-            ),
-            sky=region(
-                source.sky,
-                luminance_ratio=0.50,
-                saturation_ratio=2.05,
-                warmth_delta=12,
-                luminance_bounds=(0.16, 0.42),
-            ),
+            global_=region(source.global_, spec.global_),
+            subject=region(source.subject, spec.subject),
+            background=region(source.background, spec.background),
+            skin=region(source.skin, spec.skin),
+            foliage=region(source.foliage, spec.foliage),
+            sky=region(source.sky, spec.sky),
         ),
         active=frozenset(active),
     )
+
+
+def golden_cinematic_targets(source: StyleMetrics, masks: MaskSet) -> StyleTargets:
+    """Compatibility wrapper for the original calibrated preset."""
+    return preset_targets(source, masks, StylePreset.GOLDEN_CINEMATIC)
+
+
+def _infer_light_direction(rgb: FloatImage) -> str:
+    luminance = rgb @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    height, width = luminance.shape
+    left = float(np.mean(luminance[: int(height * 0.72), : int(width * 0.32)]))
+    right = float(np.mean(luminance[: int(height * 0.72), int(width * 0.68) :]))
+    side = "left" if left >= right else "right"
+    upper = float(np.mean(luminance[: int(height * 0.28)]))
+    middle = float(np.mean(luminance[int(height * 0.28) : int(height * 0.62)]))
+    return f"top_{side}" if upper > middle * 1.12 else side
+
+
+def _seed_style(plan: EditPlan, style: StylePreset, light_direction: str) -> EditPlan:
+    """Apply bounded optical/color signatures before metric convergence."""
+    if style is StylePreset.GOLDEN_CINEMATIC:
+        return plan.model_copy(
+            update={
+                "atmosphere": plan.atmosphere.model_copy(
+                    update={"bloom": max(plan.atmosphere.bloom, 0.035)}
+                )
+            }
+        )
+    if style is StylePreset.MALICK_LUMINOUS:
+        return plan.model_copy(
+            update={
+                "global_": plan.global_.model_copy(
+                    update={
+                        "black_depth": min(plan.global_.black_depth, -0.04),
+                        "saturation": min(plan.global_.saturation, -0.05),
+                    }
+                ),
+                "highlights": plan.highlights.model_copy(
+                    update={
+                        "recovery": max(plan.highlights.recovery, 0.32),
+                        "warmth": max(plan.highlights.warmth, 0.08),
+                        "softness": max(plan.highlights.softness, 0.16),
+                    }
+                ),
+                "shadows": plan.shadows.model_copy(
+                    update={"warmth": min(plan.shadows.warmth, -0.04)}
+                ),
+                "atmosphere": plan.atmosphere.model_copy(
+                    update={
+                        "bloom": max(plan.atmosphere.bloom, 0.075),
+                        "directional_haze": max(plan.atmosphere.directional_haze, 0.10),
+                        "edge_darkening": max(plan.atmosphere.edge_darkening, 0.04),
+                        "light_direction": light_direction,
+                    }
+                ),
+            }
+        )
+    if style is StylePreset.COPPOLA_NOSTALGIC:
+        return plan.model_copy(
+            update={
+                "global_": plan.global_.model_copy(
+                    update={
+                        "exposure_ev": max(plan.global_.exposure_ev, 0.08),
+                        "contrast": min(plan.global_.contrast, -0.08),
+                        "black_depth": min(plan.global_.black_depth, -0.14),
+                        "saturation": min(plan.global_.saturation, -0.10),
+                    }
+                ),
+                "white_balance": plan.white_balance.model_copy(
+                    update={"tint_delta": max(plan.white_balance.tint_delta, 0.025)}
+                ),
+                "highlights": plan.highlights.model_copy(
+                    update={"recovery": max(plan.highlights.recovery, 0.52), "softness": 0.28}
+                ),
+                "shadows": plan.shadows.model_copy(
+                    update={"lift": max(plan.shadows.lift, 0.16), "tint": 0.12}
+                ),
+                "background": plan.background.model_copy(
+                    update={"enabled": True, "contrast": min(plan.background.contrast, -0.12)}
+                ),
+                "sharpening": plan.sharpening.model_copy(
+                    update={"amount": min(plan.sharpening.amount, 0.06)}
+                ),
+                "atmosphere": plan.atmosphere.model_copy(
+                    update={
+                        "bloom": max(plan.atmosphere.bloom, 0.10),
+                        "halation": max(plan.atmosphere.halation, 0.075),
+                        "grain": max(plan.atmosphere.grain, 0.08),
+                        "background_softness": max(plan.atmosphere.background_softness, 0.14),
+                    }
+                ),
+            }
+        )
+    if style is StylePreset.PRERAPHAELITE_ENCHANTED:
+        return plan.model_copy(
+            update={
+                "global_": plan.global_.model_copy(
+                    update={
+                        "contrast": max(plan.global_.contrast, 0.08),
+                        "black_depth": max(plan.global_.black_depth, 0.06),
+                        "vibrance": max(plan.global_.vibrance, 0.06),
+                    }
+                ),
+                "shadows": plan.shadows.model_copy(
+                    update={"warmth": min(plan.shadows.warmth, -0.08)}
+                ),
+                "subject": plan.subject.model_copy(
+                    update={"enabled": True, "contrast": max(plan.subject.contrast, 0.05)}
+                ),
+                "background": plan.background.model_copy(
+                    update={"enabled": True, "contrast": max(plan.background.contrast, 0.06)}
+                ),
+                "skin": plan.skin.model_copy(update={"warmth": max(plan.skin.warmth, 0.12)}),
+                "atmosphere": plan.atmosphere.model_copy(
+                    update={
+                        "bloom": max(plan.atmosphere.bloom, 0.045),
+                        "edge_darkening": max(plan.atmosphere.edge_darkening, 0.18),
+                    }
+                ),
+            }
+        )
+    if style is StylePreset.FAIRYTALE_TWILIGHT:
+        return plan.model_copy(
+            update={
+                "white_balance": plan.white_balance.model_copy(
+                    update={
+                        "temperature_delta_k": min(plan.white_balance.temperature_delta_k, -320)
+                    }
+                ),
+                "global_": plan.global_.model_copy(
+                    update={
+                        "contrast": max(plan.global_.contrast, 0.10),
+                        "black_depth": max(plan.global_.black_depth, 0.06),
+                        "saturation": min(plan.global_.saturation, -0.04),
+                    }
+                ),
+                "shadows": plan.shadows.model_copy(
+                    update={"warmth": min(plan.shadows.warmth, -0.14)}
+                ),
+                "subject": plan.subject.model_copy(
+                    update={"enabled": True, "warmth": max(plan.subject.warmth, 0.24)}
+                ),
+                "background": plan.background.model_copy(
+                    update={"enabled": True, "warmth": min(plan.background.warmth, -0.15)}
+                ),
+                "skin": plan.skin.model_copy(update={"warmth": max(plan.skin.warmth, 0.20)}),
+                "atmosphere": plan.atmosphere.model_copy(
+                    update={
+                        "directional_haze": max(plan.atmosphere.directional_haze, 0.065),
+                        "edge_darkening": max(plan.atmosphere.edge_darkening, 0.14),
+                        "light_direction": light_direction,
+                    }
+                ),
+            }
+        )
+    return plan
 
 
 def style_distance(current: StyleMetrics, target: StyleTargets) -> float:
@@ -151,8 +329,7 @@ def style_distance(current: StyleMetrics, target: StyleTargets) -> float:
         )
         terms.append(abs(log2(max(current_region.luminance, 0.01) / target_region.luminance)))
         terms.append(abs(current_region.saturation - target_region.saturation) / 0.20)
-        if name in {"subject", "skin", "foliage", "sky"}:
-            terms.append(abs(current_region.warmth - target_region.warmth) / 14)
+        terms.append(abs(current_region.warmth - target_region.warmth) / 14)
     return float(np.mean(terms)) if terms else 0.0
 
 
@@ -285,9 +462,22 @@ def _adjust_plan(plan: EditPlan, current: StyleMetrics, target: StyleTargets) ->
             )
         }
     )
+    white_balance = plan.white_balance.model_copy(
+        update={
+            "temperature_delta_k": int(
+                _clamp(
+                    plan.white_balance.temperature_delta_k
+                    + (target.metrics.global_.warmth - current.global_.warmth) * 48,
+                    -1500,
+                    1500,
+                )
+            )
+        }
+    )
     return plan.model_copy(
         update={
             "global_": global_,
+            "white_balance": white_balance,
             "subject": subject,
             "background": background,
             "sky": sky,
@@ -323,8 +513,8 @@ class StyleRefiner:
             return StyleRefinement(plan, 0, 0, 0)
         preview = _preview(rgb)
         masks = build_masks(preview, portrait=plan.scene.category.value == "portrait")
-        targets = golden_cinematic_targets(measure_style(preview, masks), masks)
-        current_plan = plan
+        targets = preset_targets(measure_style(preview, masks), masks, style)
+        current_plan = _seed_style(plan, style, _infer_light_direction(preview))
         rendered, _, _ = self._engine.render_pixels(preview, masks, current_plan)
         distance = style_distance(measure_style(rendered, masks), targets)
         initial_distance = distance
