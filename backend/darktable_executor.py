@@ -65,6 +65,9 @@ class DarktableExecutor:
         await self._store.delete(session_id)
         return True
 
+    async def latest(self) -> dict[str, Any]:
+        return await self._store.latest()
+
 
 async def write_operation_manifest(path: Path, mapping: MappingResult) -> None:
     """Utility for Lua/helper integrations that need a JSON operation manifest."""
