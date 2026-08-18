@@ -11,10 +11,10 @@ A vision-guided, non-destructive editing service for Darktable 5.6+. A reduced p
 - Deterministic mappings for exposure, white balance, tone, colour, foliage, denoise, sharpen, subject, and background operations.
 - Mask-confidence gate: all local subject/background edits are skipped below the configured threshold.
 - Transactional session records and XMP snapshot restoration for revert.
-- Thin Darktable Lua panel and localhost bridge.
+- Thin Darktable Lua panel that applies supported controls to the current Darkroom image.
 - Unit tests for schema safety, mapping, prompts, and session storage.
 
-The current Lua bridge creates the reviewed, deterministic operation manifest. Applying every manifest operation directly to Darktable history requires a version-specific XMP/history adapter because Darktable's Lua processing-module parameter surface is incomplete. This boundary is deliberate: the model output is never executed, and unsupported local edits are skipped rather than approximated unsafely.
+The Lua bridge applies global exposure, contrast, saturation, and vibrance directly through Darktable's documented shortcut-action API. Every value is snapshotted before application so **Revert AI Retouch** restores it. More complex controls (white-balance chromatic adaptation, tone-equalizer bands, masks, foliage hue ranges, denoise and diffuse/sharpen parameters) remain in the validated operation manifest until their Darktable 5.6 action paths and units are calibrated. Unsupported controls are reported rather than approximated unsafely.
 
 ## Requirements
 
@@ -42,7 +42,7 @@ The service listens only on `127.0.0.1:8765`. Open `http://127.0.0.1:8765/docs` 
 2. Add `require "ai_retoucher"` to `~/.config/darktable/luarc`.
 3. Start the Python service before Darktable.
 4. Export the current Darkroom rendering as a JPEG or PNG, and set the Darktable preference `ai_retoucher/preview_path` to that path.
-5. Select exactly one image, choose a mode and protections, analyse, review the plan, then apply.
+5. Open exactly one image in **Darkroom**, choose a mode and protections, analyse, review the plan, then apply. Applying from Lighttable is rejected because processing-control actions are only safe in Darkroom.
 
 The preview export step is explicit in this first release because the Lua API does not expose one stable current-pipeline preview export method across the supported builds. The final image remains the original RAW plus Darktable/XMP history; the service does not rewrite it.
 
@@ -73,7 +73,7 @@ pytest
 ruff check .
 ```
 
-The next implementation step is a Darktable-5.6-pinned adapter that converts the allow-listed operation manifest into concrete module instances/history entries and imports subject masks. Face/skin masking and pixel-level healing remain intentionally out of scope.
+The next implementation step is calibrating the remaining Darktable-5.6 action paths and implementing subject-mask import. Face/skin masking and pixel-level healing remain intentionally out of scope.
 
 ## License
 
