@@ -222,6 +222,7 @@ class MaskArtifact(StrictModel):
 
 class RetouchReport(StrictModel):
     session_id: str
+    style: StylePreset
     output_path: str
     masks: list[MaskArtifact]
     applied: list[str]

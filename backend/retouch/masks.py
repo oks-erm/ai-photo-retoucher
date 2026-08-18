@@ -52,14 +52,15 @@ def _skin_mask(rgb: FloatImage) -> NDArray[np.uint8]:
     hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
     y, cr, cb = cv2.split(ycrcb)
     hue, saturation, value = cv2.split(hsv)
-    # Broad enough for warm/cool illumination while rejecting foliage and white fabric.
+    # Skin needs both plausible chroma and visible colour. A low saturation floor
+    # turns warm white clothing into "skin" in golden-hour frames.
     skin = (
-        (cr >= 132)
+        (cr >= 134)
         & (cr <= 181)
-        & (cb >= 76)
-        & (cb <= 135)
+        & (cb >= 78)
+        & (cb <= 132)
         & (hue <= 28)
-        & (saturation >= 24)
+        & (saturation >= 48)
         & (value >= 38)
         & (y >= 35)
     ).astype(np.uint8) * 255
@@ -72,8 +73,24 @@ def _skin_mask(rgb: FloatImage) -> NDArray[np.uint8]:
 
 def _face_mask(rgb: FloatImage, skin: NDArray[np.uint8]) -> tuple[FloatImage, float]:
     gray = cv2.cvtColor(np.clip(rgb * 255, 0, 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-    cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
-    faces = cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=4, minSize=(24, 24))
+    frontal = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_alt2.xml")
+    profile = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_profileface.xml")
+    minimum = max(24, min(gray.shape) // 80)
+    faces = list(
+        frontal.detectMultiScale(
+            gray, scaleFactor=1.08, minNeighbors=4, minSize=(minimum, minimum)
+        )
+    )
+    faces.extend(
+        profile.detectMultiScale(
+            gray, scaleFactor=1.08, minNeighbors=4, minSize=(minimum, minimum)
+        )
+    )
+    flipped = cv2.flip(gray, 1)
+    for x, y, width, height in profile.detectMultiScale(
+        flipped, scaleFactor=1.08, minNeighbors=4, minSize=(minimum, minimum)
+    ):
+        faces.append((gray.shape[1] - x - width, y, width, height))
     result = np.zeros(gray.shape, np.float32)
     for x, y, width, height in faces:
         skin_fraction = float(np.mean(skin[y : y + height, x : x + width] > 0))
@@ -86,8 +103,9 @@ def _face_mask(rgb: FloatImage, skin: NDArray[np.uint8]) -> tuple[FloatImage, fl
         if np.mean(face > 0.2) > 0.0001:
             return face, 0.92
 
-    # Profile faces often evade Haar. Use the uppermost substantial skin component,
-    # constrained to a face-like ellipse so arms and hands are not softened as faces.
+    # Fail closed unless the upper skin component is genuinely face-sized. A broad
+    # skin component can join a face, arms, and pale clothing; turning that into one
+    # ellipse used to make the face mask effectively identical to the skin mask.
     count, labels, stats, centroids = cv2.connectedComponentsWithStats(skin, 8)
     candidates = [
         i
@@ -99,6 +117,13 @@ def _face_mask(rgb: FloatImage, skin: NDArray[np.uint8]) -> tuple[FloatImage, fl
         return result, 0.0
     label = min(candidates, key=lambda i: (centroids[i][1], -stats[i, cv2.CC_STAT_AREA]))
     x, y, width, height = stats[label, :4]
+    aspect = width / max(height, 1)
+    if (
+        width > skin.shape[1] * 0.18
+        or height > skin.shape[0] * 0.24
+        or not 0.45 <= aspect <= 1.85
+    ):
+        return result, 0.0
     pad_x, pad_y = int(width * 0.45), int(height * 0.35)
     center = (x + width // 2, y + height // 2)
     cv2.ellipse(
@@ -170,7 +195,26 @@ def _rembg_session(model_name: str):  # type: ignore[no-untyped-def]
     return new_session(model_name)
 
 
-def _model_subject_mask(rgb: FloatImage, *, portrait: bool) -> tuple[FloatImage, float] | None:
+def _portrait_support(skin: NDArray[np.uint8]) -> FloatImage | None:
+    points = cv2.findNonZero(skin)
+    if points is None or len(points) < max(20, skin.size // 50000):
+        return None
+    height, width = skin.shape
+    x, y, box_width, box_height = cv2.boundingRect(points)
+    pad_x = max(int(box_width * 0.65), width // 28)
+    pad_top = max(int(box_height * 0.45), height // 35)
+    pad_bottom = max(int(box_height * 1.8), height // 4)
+    support = np.zeros((height, width), np.float32)
+    left, right = max(0, x - pad_x), min(width, x + box_width + pad_x)
+    top, bottom = max(0, y - pad_top), min(height, y + box_height + pad_bottom)
+    support[top:bottom, left:right] = 1
+    feather = max(9, min(height, width) // 90)
+    return _feather(support, feather)
+
+
+def _model_subject_mask(
+    rgb: FloatImage, *, portrait: bool, skin: NDArray[np.uint8]
+) -> tuple[FloatImage, float] | None:
     """Run a local ONNX saliency/person model; never sends pixels off-device."""
     from rembg import remove
 
@@ -181,6 +225,15 @@ def _model_subject_mask(rgb: FloatImage, *, portrait: bool) -> tuple[FloatImage,
     except Exception:  # rembg wraps download and ONNX failures in several exception types
         return None
     mask = np.asarray(mask_image.convert("L"), dtype=np.float32) / 255
+    if portrait and (support := _portrait_support(skin)) is not None:
+        constrained = mask * support
+        # Apply the portrait prior only when it retains the detected person. This
+        # removes large saliency mistakes such as an adjacent tree while avoiding a
+        # destructive crop when the colour-based skin detector is uncertain.
+        retained = float(np.sum(constrained)) / max(float(np.sum(mask)), 1e-6)
+        skin_overlap = float(np.mean(mask[skin > 0])) if np.any(skin) else 0.0
+        if retained >= 0.28 and skin_overlap >= 0.18:
+            mask = constrained
     binary = (mask >= 0.32).astype(np.uint8) * 255
     binary = _largest_components(binary, count=2)
     mask *= binary.astype(np.float32) / 255
@@ -196,7 +249,7 @@ def build_masks(rgb: FloatImage, *, portrait: bool = True) -> MaskSet:
     hsv = cv2.cvtColor(image_u8, cv2.COLOR_RGB2HSV)
     hue, saturation, value = [channel.astype(np.float32) for channel in cv2.split(hsv)]
     skin_binary = _skin_mask(rgb)
-    model_subject = _model_subject_mask(rgb, portrait=portrait)
+    model_subject = _model_subject_mask(rgb, portrait=portrait, skin=skin_binary)
     if model_subject is None:
         subject, subject_confidence = _subject_mask(rgb, skin_binary)
         # Classical fallback is useful offline, but not trustworthy enough for an
@@ -209,10 +262,6 @@ def build_masks(rgb: FloatImage, *, portrait: bool = True) -> MaskSet:
     skin = _feather(skin_binary.astype(np.float32) / 255, max(5, rgb.shape[0] // 260))
     face, face_confidence = _face_mask(rgb, skin_binary)
 
-    foliage_binary = ((hue >= 18) & (hue <= 92) & (saturation >= 35) & (value >= 18)).astype(
-        np.float32
-    )
-    foliage = _feather(foliage_binary * (1 - subject), max(5, rgb.shape[0] // 300))
     background = np.clip(1 - subject, 0, 1).astype(np.float32)
     # A hue threshold is unstable for pale sky: hue becomes effectively random near
     # grey and produces islands and halos between branches.  Use a continuous
@@ -225,6 +274,15 @@ def build_masks(rgb: FloatImage, *, portrait: bool = True) -> MaskSet:
     sky = _feather(
         sky_likelihood.astype(np.float32) * background,
         max(3, rgb.shape[0] // 520),
+    )
+    # A soft vegetation likelihood avoids hard HSV cut-out edges. Excluding the
+    # sky prevents branches and pale gaps from receiving contradictory grades.
+    hue_score = _smoothstep(hue, 14, 30) * (1 - _smoothstep(hue, 82, 105))
+    chroma_score = _smoothstep(saturation, 34, 105)
+    foliage_likelihood = hue_score * chroma_score * _smoothstep(value, 14, 54)
+    foliage = _feather(
+        foliage_likelihood.astype(np.float32) * background * (1 - sky * 0.92),
+        max(3, rgb.shape[0] // 420),
     )
     return MaskSet(
         subject=subject,

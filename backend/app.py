@@ -192,6 +192,7 @@ async def render_retouch(request: Request, body: RetouchRequest) -> RetouchRepor
     session_id = await request.app.state.store.create(record)
     return RetouchReport(
         session_id=session_id,
+        style=body.style,
         output_path=str(result.output_path),
         masks=[
             MaskArtifact(name=name, path=str(path), confidence=result.mask_confidence[name])

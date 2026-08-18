@@ -1,7 +1,7 @@
 -- Darktable AI Retoucher: intent -> validated plan -> local 16-bit masked render.
 local dt = require "darktable"
 local API = "http://127.0.0.1:8765"
-local reviewed_plan, reviewed_preview
+local reviewed_plan, reviewed_preview, comparison_source
 
 local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
 local function json_quote(value)
@@ -20,6 +20,27 @@ local function selected_image()
     dt.print_error("AI Retoucher: open exactly one image in Darkroom"); return nil
   end
   return images[1]
+end
+local function is_ai_output(image)
+  return image and tostring(image.filename):match("%-ai%-") ~= nil
+end
+local function remember_source(image)
+  if image and not is_ai_output(image) then comparison_source = image end
+end
+local function comparison_image()
+  if comparison_source then
+    local valid = pcall(function()
+      return comparison_source.path .. "/" .. comparison_source.filename
+    end)
+    if valid then return comparison_source end
+    comparison_source = nil
+  end
+  local image = selected_image()
+  if image and is_ai_output(image) then
+    return nil, "Select the original RAW before comparing another style"
+  end
+  remember_source(image)
+  return image, nil
 end
 local function darktable_cli()
   local configured = dt.preferences.read("ai_retoucher", "darktable_cli", "string")
@@ -93,6 +114,10 @@ local function retouch_api(image, input, output, plan, style_name)
   if not body then return nil, "local retouch failed; check backend log" end
   local returned = body:match('"output_path"%s*:%s*"(.-)"')
   if not returned then return nil, "backend returned no output" end
+  local returned_style = body:match('"style"%s*:%s*"(.-)"')
+  if returned_style ~= style_name then
+    return nil, "backend style mismatch; restart the updated backend"
+  end
   return returned:gsub("\\/", "/"), nil
 end
 
@@ -159,6 +184,7 @@ local function import_output(path)
   return true
 end
 local function render_plan(image, plan)
+  remember_source(image)
   status.label = "Exporting current edit as 16-bit TIFF…"
   local working, export_error = render_working_tiff(image)
   if not working then return false, export_error end
@@ -173,7 +199,7 @@ local function render_plan(image, plan)
     return false, "TIFF created at " .. rendered .. " but Darktable could not import it"
   end
   reviewed_plan = nil; remove_file(reviewed_preview); reviewed_preview = nil
-  return true, "Done — editable TIFF and reusable masks saved beside the RAW"
+  return true, "Done — " .. style_name .. " rendered from the original source"
 end
 
 local analyse_retouch = dt.new_widget("button") {
@@ -182,6 +208,10 @@ local analyse_retouch = dt.new_widget("button") {
     if dt.gui.current_view() ~= dt.gui.views.darkroom then status.label = "Open one image in Darkroom"; return end
     if not api_available() then status.label = "Backend is not running"; return end
     local image = selected_image(); if not image then return end
+    if is_ai_output(image) then
+      status.label = "Select the original RAW, not an AI output"; return
+    end
+    remember_source(image)
     status.label = "Rendering private analysis preview…"
     local preview, export_error = render_preview(image)
     if not preview then status.label = export_error; return end
@@ -203,7 +233,8 @@ local render_reviewed = dt.new_widget("button") {
   label = "Render reviewed plan",
   clicked_callback = function()
     if not reviewed_plan then status.label = "No reviewed plan is waiting"; return end
-    local image = selected_image(); if not image then return end
+    local image, source_error = comparison_image()
+    if not image then status.label = source_error or "Select the original RAW"; return end
     local ok, message = render_plan(image, reviewed_plan); status.label = message
     if not ok then dt.print_error("AI Retoucher: " .. message) end
   end,
@@ -212,7 +243,8 @@ local render_saved = dt.new_widget("button") {
   label = "Retouch with saved plan (free)",
   clicked_callback = function()
     if not api_available() then status.label = "Backend is not running"; return end
-    local image = selected_image(); if not image then return end
+    local image, source_error = comparison_image()
+    if not image then status.label = source_error or "Select the original RAW"; return end
     status.label = "Loading original model plan — no OpenAI call…"
     local plan = latest_plan_api(); if not plan then status.label = "No saved plan found"; return end
     local ok, message = render_plan(image, plan); status.label = message

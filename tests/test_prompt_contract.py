@@ -40,6 +40,13 @@ def test_lua_exposes_every_style_without_requiring_expert_intent() -> None:
         "custom",
     ):
         assert f'"{style}"' in text
+
+
+def test_lua_pins_style_comparisons_to_original_source() -> None:
+    text = Path("lua/ai_retoucher.lua").read_text()
+    assert "comparison_source" in text
+    assert "Select the original RAW before comparing another style" in text
+    assert "backend style mismatch" in text
     assert "Apply the selected preset faithfully" in text
 
 
