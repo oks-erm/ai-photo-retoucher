@@ -40,6 +40,52 @@ def _blend(base: FloatImage, adjusted: FloatImage, mask: NDArray[np.float32]) ->
     return base * (1 - mask[..., None]) + adjusted * mask[..., None]
 
 
+def _apply_user_controls(
+    original: FloatImage,
+    rendered: FloatImage,
+    *,
+    strength: float,
+    naturalness: float,
+) -> FloatImage:
+    """Apply UI controls deterministically after the complete full-strength edit.
+
+    Strength is an exact blend against the source. Naturalness retains the edited
+    luminance structure but progressively restores the source's colour ratios and
+    slightly restrains large tonal departures. This makes the controls independent:
+    strength controls how much edit is present; naturalness controls its character.
+    """
+    strength = float(np.clip(strength, 0, 1))
+    naturalness = float(np.clip(naturalness, 0, 1))
+    if naturalness:
+        original_luma = _luma(original)
+        rendered_luma = _luma(rendered)
+        ratio = np.divide(
+            rendered_luma,
+            np.maximum(original_luma, 1e-4),
+            out=np.ones_like(rendered_luma),
+            where=original_luma > 1e-4,
+        )
+        source_colour = np.clip(original * ratio[..., None], 0, 1)
+        colour_restore = 0.88 * naturalness**1.15
+        rendered = rendered * (1 - colour_restore) + source_colour * colour_restore
+
+        # At maximum naturalness retain 72% of the intended tonal correction. The
+        # edit stays useful, but strong local separation cannot look synthetic.
+        desired_luma = original_luma + (rendered_luma - original_luma) * (
+            1 - 0.28 * naturalness
+        )
+        current_luma = _luma(rendered)
+        luma_ratio = np.divide(
+            desired_luma,
+            np.maximum(current_luma, 1e-4),
+            out=np.ones_like(desired_luma),
+            where=current_luma > 1e-4,
+        )
+        rendered = np.clip(rendered * luma_ratio[..., None], 0, 1)
+
+    return np.clip(original + (rendered - original) * strength, 0, 1).astype(np.float32)
+
+
 def _saturation(rgb: FloatImage, amount: float) -> FloatImage:
     luminance = _luma(rgb)[..., None]
     return np.clip(luminance + (rgb - luminance) * (1 + amount), 0, 1)
@@ -479,11 +525,22 @@ class RetouchEngine:
         *,
         export_masks: bool = True,
         style: StylePreset | None = None,
+        strength: float = 1,
+        naturalness: float = 0,
     ) -> RenderResult:
         rgb, input_bit_depth = self.read(input_path)
         masks = build_masks(rgb, portrait=plan.scene.category.value == "portrait")
         warnings: list[str] = []
         result, applied, skipped = self.render_pixels(rgb, masks, plan, style=style)
+        result = _apply_user_controls(
+            rgb,
+            result,
+            strength=strength,
+            naturalness=naturalness,
+        )
+        applied.append(
+            f"user controls (strength={strength:.2f}, naturalness={naturalness:.2f})"
+        )
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_u16 = np.clip(result * 65535 + 0.5, 0, 65535).astype(np.uint16)
