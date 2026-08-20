@@ -53,7 +53,8 @@ Enable **Review plan before rendering** if you want to read the plan summary fir
 
 - 16-bit global exposure, S-curve contrast, black-depth shaping, highlight compression/softness, and shadow lift
 - white-balance temperature/tint, saturation, vibrance, and separate highlight/shadow warmth
-- local ONNX subject matte and inverse-background adjustment
+- local ONNX subject matte with a neutral confidence band at uncertain hair and
+  clothing edges, preventing opposing foreground/background grades from creating halos
 - soft sky/background luminance mask with bounded darkening, warmth, and saturation
 - masked green/yellow foliage lightness and chroma
 - confidence-gated skin tone, warmth, chroma, and texture-preserving bilateral smoothing
