@@ -31,8 +31,8 @@ fi
 
 cd "$PROJECT_DIR"
 uv sync --python 3.12
-echo "Preparing the local portrait-mask model (one-time 176 MB download)..."
-uv run --python 3.12 python -c 'from rembg import new_session; new_session("u2net_human_seg")'
+echo "Preparing the local high-detail portrait-mask model (one-time 214 MB download)..."
+uv run --python 3.12 python -c 'from rembg import new_session; new_session("birefnet-general-lite")'
 mkdir -p "$LUA_DIR" "$AGENT_DIR" "$LOG_DIR"
 cp "$PROJECT_DIR/lua/ai_retoucher.lua" "$LUA_DIR/ai_retoucher.lua"
 touch "$LUARC"
@@ -61,4 +61,19 @@ launchctl bootout "gui/$(id -u)" "$AGENT_FILE" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$AGENT_FILE"
 launchctl kickstart -k "gui/$(id -u)/com.oksanaerm.darktable-ai-retoucher"
 
-echo "Installed. Restart Darktable, open one photo in Darkroom, and click Analyse & Retouch."
+EXPECTED_VERSION="2026.08.21.3"
+READY=false
+for _ in {1..20}; do
+  if curl --connect-timeout 1 --max-time 2 --fail --silent \
+    http://127.0.0.1:8765/health | grep -Fq "$EXPECTED_VERSION"; then
+    READY=true
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$READY" != true ]]; then
+  echo "Backend did not start renderer $EXPECTED_VERSION. Check $LOG_DIR/backend-error.log" >&2
+  exit 1
+fi
+
+echo "Installed renderer $EXPECTED_VERSION. Restart Darktable, open one photo in Darkroom, and click Analyse & Retouch."
