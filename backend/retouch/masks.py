@@ -47,16 +47,16 @@ def _smoothstep(values: FloatImage, lower: float, upper: float) -> FloatImage:
 
 
 def _safe_local_masks(alpha: FloatImage) -> tuple[FloatImage, FloatImage]:
-    """Turn one uncertain matte into non-overlapping adjustment masks.
+    """Create a narrow, complementary matte for one-pass local compositing.
 
-    Segmentation alpha is not a compositing matte we control: intermediate values
-    often mean "the model is unsure" rather than literal semi-transparency. Applying
-    opposing subject/background grades through those values creates bright or dark
-    rims. Keep an ungraded guard band around uncertain boundaries instead.
+    Leaving uncertain pixels ungraded makes the original bright background visible
+    between a lifted subject and darkened background. That neutral strip is itself a
+    halo. A steep remap keeps the learned sub-pixel edge while ensuring every pixel
+    belongs to exactly one complementary blend.
     """
     alpha = np.clip(alpha, 0, 1).astype(np.float32)
-    subject = _smoothstep(alpha, 0.56, 0.90)
-    background = _smoothstep(1 - alpha, 0.68, 0.96)
+    subject = _smoothstep(alpha, 0.38, 0.62)
+    background = (1 - subject).astype(np.float32)
     return subject, background
 
 
@@ -232,7 +232,12 @@ def _model_subject_mask(
     """Run a local ONNX saliency/person model; never sends pixels off-device."""
     from rembg import remove
 
-    model_name = "u2net_human_seg" if portrait else "u2net"
+    # BiRefNet Lite produces a materially narrower portrait boundary than the old
+    # U2Net human-segmentation matte, especially around bright clothing and rim-lit
+    # faces. The full portrait model is four times larger and did not improve the
+    # difficult dark-hair-on-tree boundary in validation, so Lite is the practical
+    # high-quality default.
+    model_name = "birefnet-general-lite" if portrait else "u2net"
     image = Image.fromarray(np.clip(rgb * 255, 0, 255).astype(np.uint8), "RGB")
     try:
         mask_image = remove(image, session=_rembg_session(model_name), only_mask=True)
