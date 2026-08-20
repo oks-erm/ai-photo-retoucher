@@ -1,80 +1,107 @@
 # Darktable AI Retoucher
 
-A vision-guided, non-destructive editing service for Darktable 5.6+. A reduced preview is analysed by an OpenAI vision model, the response is constrained to a Pydantic `EditPlan`, and deterministic code maps semantic photographic controls to an allow-listed Darktable operation manifest. The model never emits Lua or executable module settings.
+Describe the finish you want in Darktable and get a full-resolution, masked, 16-bit TIFF retouch beside the original RAW. OpenAI turns a private 2048 px preview and your intent into a bounded edit plan with exactly one API request. Up to six deterministic local measurement/render passes then tune that same plan toward the selected style—without further API use. All final pixel processing and masks run locally on the Mac.
 
-## What is implemented
+The result is a new TIFF imported into Darktable. The RAW and its existing history remain untouched, and the TIFF can be developed further with normal Darktable modules. Six full-resolution 16-bit masks are saved beside it for subject, background, skin, face, foliage, and sky.
 
-- Loopback-only FastAPI service with `/v1/analyse`, `/v1/critique`, `/v1/apply`, `/v1/revert`, and `/health`.
-- Async OpenAI Responses API integration with Pydantic Structured Outputs and image inputs.
-- Strict, bounded `EditPlan` and `DeltaPlan` contracts. Unknown fields and unsafe ranges fail before application.
-- Objective preview statistics (luminance percentiles and clipping fractions), 2048 px maximum analysis preview, and no RAW upload.
-- Deterministic mappings for exposure, white balance, tone, colour, foliage, denoise, sharpen, subject, and background operations.
-- Mask-confidence gate: all local subject/background edits are skipped below the configured threshold.
-- Transactional session records and XMP snapshot restoration for revert.
-- Thin Darktable Lua panel and localhost bridge.
-- Unit tests for schema safety, mapping, prompts, and session storage.
+## Install on macOS
 
-The current Lua bridge creates the reviewed, deterministic operation manifest. Applying every manifest operation directly to Darktable history requires a version-specific XMP/history adapter because Darktable's Lua processing-module parameter surface is incomplete. This boundary is deliberate: the model output is never executed, and unsupported local edits are skipped rather than approximated unsafely.
-
-## Requirements
-
-- Python 3.12+
-- Darktable 5.6+ with Lua enabled
-- `curl` for the Lua bridge
-- An OpenAI API key for analysis and critique
-
-## Install and run
+Requirements: Darktable 5.6+ in `/Applications`, [uv](https://docs.astral.sh/uv/), about 500 MB of free space for dependencies/model, and an OpenAI API key.
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e '.[dev]'
+git clone https://github.com/oks-erm/ai-photo-retoucher.git
+cd ai-photo-retoucher
+git switch agent/implement-darktable-ai-retoucher
 cp .env.example .env
-# Add OPENAI_API_KEY to .env
-ai-retoucher
+# Edit .env and set OPENAI_API_KEY
+bash scripts/install_macos.sh
 ```
 
-The service listens only on `127.0.0.1:8765`. Open `http://127.0.0.1:8765/docs` for the local API schema.
+The installer uses Python 3.12, downloads the local high-detail BiRefNet Lite matte model once (214 MB), installs the Lua panel, verifies the exact renderer version, and starts the loopback backend automatically. Restart Darktable after installation.
 
-## Darktable integration
+## Retouch one photo
 
-1. Copy `lua/ai_retoucher.lua` into `~/.config/darktable/lua/`.
-2. Add `require "ai_retoucher"` to `~/.config/darktable/luarc`.
-3. Start the Python service before Darktable.
-4. Export the current Darkroom rendering as a JPEG or PNG, and set the Darktable preference `ai_retoucher/preview_path` to that path.
-5. Select exactly one image, choose a mode and protections, analyse, review the plan, then apply.
+1. Open exactly one photo in **Darkroom**.
+2. Open **AI Retoucher** in the right panel, choose Portrait, Technical, or Creative, and select a photographic preset.
+3. The intent box is optional. Use it only for a concrete exception or priority, for example:
 
-The preview export step is explicit in this first release because the Lua API does not expose one stable current-pipeline preview export method across the supported builds. The final image remains the original RAW plus Darktable/XMP history; the service does not rewrite it.
+   `Prioritise the woman's face and keep the white dress detailed.`
 
-## API examples
+4. Set Strength around `0.65` and Naturalness around `0.85`.
+5. Click **Analyse & Retouch**.
 
-Analyse:
+Both sliders are deterministic local render controls and also work with **Retouch
+with saved plan (free)**. Strength blends from the untouched source at `0.00` to the
+complete edit at `1.00`. Naturalness moderately preserves more of the source colour
+relationships and restrains large tonal departures without erasing the selected preset;
+`0.00` gives the full expressive palette and `1.00` gives the most photographic restraint.
+
+The first local render after installation can be slower while ONNX initializes. The new file is rendered at the source dimensions, named like `RVAZ4030-ai-malick-luminous-20260818-174500.tif`, and imported into Darktable automatically. Its mask directory has the same stem plus `-masks`.
+
+## Presets
+
+| Preset | Recognizable result |
+|---|---|
+| **Golden hour cinematic** | The approved reference look: luminous warm subject, darker amber sky, deep quiet foliage and strong separation. |
+| **Malick — luminous natural** | Peach-honey skin, pale-gold highlights, olive/moss foliage, cool green-grey shadows, lifted blacks and restrained directional haze. |
+| **Coppola — nostalgic dream** | Creamy highlights, lifted faded blacks, muted yellow-green foliage, dusty-pink/lavender tonality, fine grain, bloom and small halation. |
+| **Pre-Raphaelite forest** | Warm ivory skin, emerald/blue-green foliage, preserved reds, cyan deep shadows, amber highlights and selective painterly darkness. |
+| **Fairytale twilight** | A cool blue-hour environment with warm subject light, deeper teal-green background, pale-yellow highlights and directional glow. |
+| **Custom intent only** | No preset signature or local style convergence; the model follows the written intent alone. |
+
+Preset names describe broad photographic and cinematic colour vocabularies. They do not copy a specific film frame or painting, and the pipeline never changes identity, geometry, pose or location.
+
+**Golden cinematic** is a reusable style signature measured from the supplied example, not a hardcoded recipe for that one frame. It locally aims for a brighter, warmer subject; protected white clothing and skin texture; a substantially darker background and sky; and deeper, quieter foliage. Each pass measures the current image, adjusts bounded plan values, renders again, and keeps only an improvement. Choose **Custom intent only** to apply the model's plan without this style convergence.
+
+Enable **Review plan before rendering** if you want to read the plan summary first. After the first analysis, change the preset and click **Retouch with saved plan (free)** to create as many comparisons as you want without calling OpenAI again. The button always reloads the untouched original model plan, so styles never stack or contaminate each other.
+
+## What is actually applied
+
+- 16-bit global exposure, S-curve contrast, black-depth shaping, highlight compression/softness, and shadow lift
+- white-balance temperature/tint, saturation, vibrance, and separate highlight/shadow warmth
+- local ONNX subject matte with a neutral confidence band at uncertain hair and
+  clothing edges, preventing opposing foreground/background grades from creating halos
+- soft sky/background luminance mask with bounded darkening, warmth, and saturation
+- masked green/yellow foliage lightness and chroma
+- confidence-gated skin tone, warmth, chroma, and texture-preserving bilateral smoothing
+- deterministic bloom, halation, fine grain, background softness, directional amber haze and selective edge darkening
+- edge-preserving denoise and bounded unsharp detail
+- highlight and deep-shadow protection
+- reusable full-resolution 16-bit masks, with explicit applied/skipped reporting in the session JSON
+
+The local models and refinement loop never send pixels anywhere. OpenAI receives only the temporary 2048 px JPEG used for the single intent-to-plan request. `store=False` is set on the Responses API request.
+
+## Why the result is a TIFF
+
+Darktable's stable Lua API cannot create arbitrary processing-module instances and drawn/parametric masks reliably. Earlier versions tried to drive a handful of shortcut actions and could only apply a fraction of a plan. This version exports Darktable's current RAW development at full resolution, performs the complete masked retouch locally, and imports a 16-bit TIFF derivative. This preserves the original and gives you a high-bit-depth image you can continue editing, while avoiding unsupported XMP/database manipulation.
+
+## Service and logs
 
 ```bash
-curl -F image=@preview.jpg \
-  -F 'context={"mode":"portrait","intent":"warm natural outdoor portrait","strength":0.6,"naturalness":0.9}' \
-  http://127.0.0.1:8765/v1/analyse
+curl http://127.0.0.1:8765/health
+open http://127.0.0.1:8765/docs
 ```
 
-Apply accepts an `image_id`, optional image/XMP paths, the validated `edit_plan`, and optional `mask_confidence`. Revert accepts the returned `session_id`.
+Backend logs are in `~/Library/Logs/darktable-ai-retoucher/`. Darktable export failures are logged to `/tmp/darktable-ai-retoucher-export.log`. Session plans and capability reports are stored under `~/.cache/darktable-ai-retoucher/sessions/` by default.
 
-## Privacy and failure behavior
-
-- Only resized JPEG previews are sent to OpenAI; RAW files and XMP files remain local.
-- API responses are requested with `store=False`.
-- The service stores operation/session JSON locally with owner-only permissions and no pixels unless a future debug workflow explicitly adds them.
-- Missing API credentials disable analysis but leave health, deterministic mapping/application, revert, and Darktable itself usable.
-- Invalid plans, oversized uploads, unsupported media, and low-confidence masks fail closed.
+To run the service manually, stop the LaunchAgent with `bash scripts/uninstall_macos.sh`, then run `uv run --python 3.12 ai-retoucher` from the repository.
 
 ## Development
 
 ```bash
-pytest
-ruff check .
+uv sync --python 3.12 --extra dev
+uv run --python 3.12 pytest
+uv run --python 3.12 ruff check .
 ```
 
-The next implementation step is a Darktable-5.6-pinned adapter that converts the allow-listed operation manifest into concrete module instances/history entries and imports subject masks. Face/skin masking and pixel-level healing remain intentionally out of scope.
+## Uninstall
+
+```bash
+bash scripts/uninstall_macos.sh
+```
+
+Generated TIFFs and their mask folders are user files and are intentionally not deleted by the uninstaller.
 
 ## License
 
-MIT
+MIT. The optional portrait matte model is downloaded and executed locally through `rembg`.

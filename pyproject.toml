@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "darktable-ai-retoucher"
+version = "0.1.0"
+description = "Vision-guided, non-destructive photographic editing for Darktable"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+dependencies = [
+  "fastapi>=0.116,<1",
+  "httpx[socks]>=0.28,<1",
+  "numpy>=2.1,<3",
+  "opencv-python-headless>=4.10,<5",
+  "openai>=1.101,<2",
+  "pillow>=11.3,<12",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "python-multipart>=0.0.20,<1",
+  "rembg[cpu]>=2.0.67,<3",
+  "tifffile>=2025.6,<2027",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4,<9", "pytest-asyncio>=1.1,<2", "ruff>=0.12,<1"]
+
+[project.scripts]
+ai-retoucher = "backend.app:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
