@@ -1,7 +1,9 @@
 -- Darktable AI Retoucher: intent -> validated plan -> local 16-bit masked render.
 local dt = require "darktable"
 local API = "http://127.0.0.1:8765"
+local REQUIRED_RENDERER_VERSION = "2026.08.21.3"
 local reviewed_plan, reviewed_preview, comparison_source
+local api_error = "Backend is not running"
 
 local function quote(value) return "'" .. tostring(value):gsub("'", "'\\''") .. "'" end
 local function json_quote(value)
@@ -52,8 +54,12 @@ local function darktable_cli()
   return "darktable-cli"
 end
 local function api_available()
-  return os.execute("curl --connect-timeout 1 --max-time 2 --fail --silent "
-    .. quote(API .. "/health") .. " >/dev/null 2>&1") == true
+  local command = "curl --connect-timeout 1 --max-time 2 --fail --silent "
+    .. quote(API .. "/health") .. " | grep -F " .. quote(REQUIRED_RENDERER_VERSION)
+    .. " >/dev/null 2>&1"
+  if os.execute(command) == true then return true end
+  api_error = "Backend is missing or outdated — rerun scripts/install_macos.sh"
+  return false
 end
 local function render(image, extension, export_options, core_options)
   local source, output = image.path .. "/" .. image.filename, os.tmpname() .. extension
@@ -203,14 +209,16 @@ local function render_plan(image, plan)
     return false, "TIFF created at " .. rendered .. " but Darktable could not import it"
   end
   reviewed_plan = nil; remove_file(reviewed_preview); reviewed_preview = nil
-  return true, "Done — " .. style_name .. " rendered from the original source"
+  return true, "Done — " .. style_name .. string.format(
+    " at S %.2f / N %.2f", strength.value, naturalness.value
+  )
 end
 
 local analyse_retouch = dt.new_widget("button") {
   label = "Analyse & Retouch",
   clicked_callback = function()
     if dt.gui.current_view() ~= dt.gui.views.darkroom then status.label = "Open one image in Darkroom"; return end
-    if not api_available() then status.label = "Backend is not running"; return end
+    if not api_available() then status.label = api_error; return end
     local image = selected_image(); if not image then return end
     if is_ai_output(image) then
       status.label = "Select the original RAW, not an AI output"; return
@@ -246,7 +254,7 @@ local render_reviewed = dt.new_widget("button") {
 local render_saved = dt.new_widget("button") {
   label = "Retouch with saved plan (free)",
   clicked_callback = function()
-    if not api_available() then status.label = "Backend is not running"; return end
+    if not api_available() then status.label = api_error; return end
     local image, source_error = comparison_image()
     if not image then status.label = source_error or "Select the original RAW"; return end
     status.label = "Loading original model plan — no OpenAI call…"
