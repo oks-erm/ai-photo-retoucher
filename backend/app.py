@@ -172,6 +172,8 @@ async def render_retouch(request: Request, body: RetouchRequest) -> RetouchRepor
             refinement.plan,
             export_masks=body.export_masks,
             style=body.style,
+            strength=body.strength,
+            naturalness=body.naturalness,
         )
     except (OSError, ValueError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -182,6 +184,8 @@ async def render_retouch(request: Request, body: RetouchRequest) -> RetouchRepor
         "model_edit_plan": body.edit_plan.model_dump(by_alias=True),
         "edit_plan": refinement.plan.model_dump(by_alias=True),
         "style": body.style,
+        "strength": body.strength,
+        "naturalness": body.naturalness,
         "refinement_passes": refinement.passes,
         "initial_style_distance": refinement.initial_distance,
         "final_style_distance": refinement.final_distance,
@@ -194,6 +198,8 @@ async def render_retouch(request: Request, body: RetouchRequest) -> RetouchRepor
     return RetouchReport(
         session_id=session_id,
         style=body.style,
+        strength=body.strength,
+        naturalness=body.naturalness,
         output_path=str(result.output_path),
         masks=[
             MaskArtifact(name=name, path=str(path), confidence=result.mask_confidence[name])
