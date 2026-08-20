@@ -17,7 +17,7 @@ cp .env.example .env
 bash scripts/install_macos.sh
 ```
 
-The installer uses Python 3.12, downloads the Apache-2.0 local portrait model once (176 MB), installs the Lua panel, and starts the loopback backend automatically. Restart Darktable after installation.
+The installer uses Python 3.12, downloads the local high-detail BiRefNet Lite matte model once (214 MB), installs the Lua panel, verifies the exact renderer version, and starts the loopback backend automatically. Restart Darktable after installation.
 
 ## Retouch one photo
 
@@ -32,9 +32,9 @@ The installer uses Python 3.12, downloads the Apache-2.0 local portrait model on
 
 Both sliders are deterministic local render controls and also work with **Retouch
 with saved plan (free)**. Strength blends from the untouched source at `0.00` to the
-complete edit at `1.00`. Naturalness preserves progressively more of the source colour
-relationships and restrains large tonal departures; `0.00` gives the full expressive
-palette and `1.00` gives the most photographic restraint.
+complete edit at `1.00`. Naturalness moderately preserves more of the source colour
+relationships and restrains large tonal departures without erasing the selected preset;
+`0.00` gives the full expressive palette and `1.00` gives the most photographic restraint.
 
 The first local render after installation can be slower while ONNX initializes. The new file is rendered at the source dimensions, named like `RVAZ4030-ai-malick-luminous-20260818-174500.tif`, and imported into Darktable automatically. Its mask directory has the same stem plus `-masks`.
 
@@ -104,4 +104,4 @@ Generated TIFFs and their mask folders are user files and are intentionally not 
 
 ## License
 
-MIT. The optional local portrait mask uses the Apache-2.0 U2Net human-segmentation model downloaded by `rembg`.
+MIT. The optional portrait matte model is downloaded and executed locally through `rembg`.
