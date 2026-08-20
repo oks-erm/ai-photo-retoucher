@@ -42,25 +42,22 @@ def test_portrait_support_excludes_distant_salient_object() -> None:
     assert support[65, 20] < 0.01
 
 
-def test_safe_local_masks_leave_uncertain_edge_ungraded() -> None:
+def test_safe_local_masks_are_complementary_at_uncertain_edge() -> None:
     alpha = np.array([[0.0, 0.20, 0.45, 0.60, 0.80, 1.0]], np.float32)
 
     subject, background = _safe_local_masks(alpha)
 
     assert background[0, 0] == 1
     assert subject[0, -1] == 1
-    assert subject[0, 2] == 0
-    assert background[0, 2] == 0
-    assert not np.any((subject > 0) & (background > 0))
+    assert np.allclose(subject + background, 1)
+    assert 0 < subject[0, 2] < 1
+    assert 0 < background[0, 2] < 1
 
 
-def test_safe_local_masks_do_not_create_opposing_grade_at_boundary() -> None:
+def test_safe_local_masks_have_no_visible_neutral_strip() -> None:
     alpha = np.linspace(0, 1, 101, dtype=np.float32)[None, :]
     subject, background = _safe_local_masks(alpha)
-    neutral_pixels = (alpha >= 0.32) & (alpha <= 0.56)
-
-    # Simulate strong, opposing local exposure changes. The uncertain matte edge
-    # must remain neutral rather than become a bright/dark seam.
-    adjustment = subject * 0.40 - background * 0.40
-
-    assert np.max(np.abs(adjustment[neutral_pixels])) == 0
+    assert np.allclose(subject + background, 1)
+    assert not np.any((subject == 0) & (background == 0))
+    transition = (subject > 0) & (subject < 1)
+    assert np.mean(transition) < 0.25
