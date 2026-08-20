@@ -46,6 +46,20 @@ def _smoothstep(values: FloatImage, lower: float, upper: float) -> FloatImage:
     return (scaled * scaled * (3 - 2 * scaled)).astype(np.float32)
 
 
+def _safe_local_masks(alpha: FloatImage) -> tuple[FloatImage, FloatImage]:
+    """Turn one uncertain matte into non-overlapping adjustment masks.
+
+    Segmentation alpha is not a compositing matte we control: intermediate values
+    often mean "the model is unsure" rather than literal semi-transparency. Applying
+    opposing subject/background grades through those values creates bright or dark
+    rims. Keep an ungraded guard band around uncertain boundaries instead.
+    """
+    alpha = np.clip(alpha, 0, 1).astype(np.float32)
+    subject = _smoothstep(alpha, 0.56, 0.90)
+    background = _smoothstep(1 - alpha, 0.68, 0.96)
+    return subject, background
+
+
 def _skin_mask(rgb: FloatImage) -> NDArray[np.uint8]:
     image = np.clip(rgb * 255, 0, 255).astype(np.uint8)
     ycrcb = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)
@@ -234,10 +248,14 @@ def _model_subject_mask(
         skin_overlap = float(np.mean(mask[skin > 0])) if np.any(skin) else 0.0
         if retained >= 0.28 and skin_overlap >= 0.18:
             mask = constrained
-    binary = (mask >= 0.32).astype(np.uint8) * 255
+    # Use a low threshold only to discard disconnected saliency noise. Keep the
+    # model's native alpha at the retained person edge: thresholding followed by a
+    # Gaussian blur manufactured a wide semi-transparent rim around hair and pale
+    # clothing, which became visible as soon as foreground and background received
+    # different grades.
+    binary = (mask >= 0.08).astype(np.uint8) * 255
     binary = _largest_components(binary, count=2)
     mask *= binary.astype(np.float32) / 255
-    mask = _feather(mask, max(5, rgb.shape[0] // 320))
     coverage = float(np.mean(mask > 0.35))
     if not 0.005 <= coverage <= 0.85:
         return None
@@ -251,18 +269,18 @@ def build_masks(rgb: FloatImage, *, portrait: bool = True) -> MaskSet:
     skin_binary = _skin_mask(rgb)
     model_subject = _model_subject_mask(rgb, portrait=portrait, skin=skin_binary)
     if model_subject is None:
-        subject, subject_confidence = _subject_mask(rgb, skin_binary)
+        subject_alpha, subject_confidence = _subject_mask(rgb, skin_binary)
         # Classical fallback is useful offline, but not trustworthy enough for an
         # automatic local adjustment. The engine will export it for inspection and
         # fail closed rather than apply it as if it were a neural mask.
         subject_confidence = min(subject_confidence, 0.39)
     else:
-        subject, subject_confidence = model_subject
-    skin_binary = np.where(subject > 0.12, skin_binary, 0).astype(np.uint8)
+        subject_alpha, subject_confidence = model_subject
+    subject, background = _safe_local_masks(subject_alpha)
+    skin_binary = np.where(subject_alpha > 0.12, skin_binary, 0).astype(np.uint8)
     skin = _feather(skin_binary.astype(np.float32) / 255, max(5, rgb.shape[0] // 260))
     face, face_confidence = _face_mask(rgb, skin_binary)
 
-    background = np.clip(1 - subject, 0, 1).astype(np.float32)
     # A hue threshold is unstable for pale sky: hue becomes effectively random near
     # grey and produces islands and halos between branches.  Use a continuous
     # bright/low-chroma likelihood instead.  Subject exclusion protects faces and
