@@ -100,13 +100,15 @@ local function output_path(image, style_name)
   return image.path .. "/" .. stem .. "-ai-" .. style_slug .. "-"
     .. os.date("%Y%m%d-%H%M%S") .. ".tif"
 end
-local function retouch_api(image, input, output, plan, style_name)
+local function retouch_api(image, input, output, plan, style_name, strength_value, naturalness_value)
   local payload_path = os.tmpname()
   local payload = io.open(payload_path, "w"); if not payload then return nil, "request failed" end
   payload:write('{"image_id":' .. json_quote(tostring(image.id))
     .. ',"input_path":' .. json_quote(input) .. ',"output_path":' .. json_quote(output)
     .. ',"edit_plan":' .. plan .. ',"export_masks":true,"style":'
-    .. json_quote(style_name) .. ',"auto_refine":true,"refinement_passes":6}')
+    .. json_quote(style_name)
+    .. string.format(',"strength":%.3f,"naturalness":%.3f', strength_value, naturalness_value)
+    .. ',"auto_refine":true,"refinement_passes":6}')
   payload:close()
   local body = request_file("curl --fail --silent --show-error -H 'Content-Type: application/json'"
     .. " --data-binary @" .. quote(payload_path) .. " " .. quote(API .. "/v1/retouch"))
@@ -191,7 +193,9 @@ local function render_plan(image, plan)
   local style_name = styles[style.selected]
   local output = output_path(image, style_name)
   status.label = "Building masks and retouching locally…"
-  local rendered, retouch_error = retouch_api(image, working, output, plan, style_name)
+  local rendered, retouch_error = retouch_api(
+    image, working, output, plan, style_name, strength.value, naturalness.value
+  )
   remove_file(working)
   if not rendered then return false, retouch_error end
   status.label = "Importing editable TIFF into Darktable…"
