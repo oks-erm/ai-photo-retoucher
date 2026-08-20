@@ -210,6 +210,8 @@ class RetouchRequest(StrictModel):
     edit_plan: EditPlan
     export_masks: bool = True
     style: StylePreset = StylePreset.GOLDEN_CINEMATIC
+    strength: Annotated[float, Field(ge=0, le=1)] = 0.65
+    naturalness: Annotated[float, Field(ge=0, le=1)] = 0.85
     auto_refine: bool = True
     refinement_passes: Annotated[int, Field(ge=0, le=6)] = 6
 
@@ -223,6 +225,8 @@ class MaskArtifact(StrictModel):
 class RetouchReport(StrictModel):
     session_id: str
     style: StylePreset
+    strength: Annotated[float, Field(ge=0, le=1)]
+    naturalness: Annotated[float, Field(ge=0, le=1)]
     output_path: str
     masks: list[MaskArtifact]
     applied: list[str]
