@@ -66,13 +66,14 @@ def _apply_user_controls(
             where=original_luma > 1e-4,
         )
         source_colour = np.clip(original * ratio[..., None], 0, 1)
-        colour_restore = 0.88 * naturalness**1.15
+        # Naturalness must restrain a preset, not erase its identity. Restoring at
+        # most 28% of source chromaticity keeps named palettes visibly distinct.
+        colour_restore = 0.28 * naturalness**1.35
         rendered = rendered * (1 - colour_restore) + source_colour * colour_restore
 
-        # At maximum naturalness retain 72% of the intended tonal correction. The
-        # edit stays useful, but strong local separation cannot look synthetic.
+        # At maximum naturalness retain 84% of the intended tonal correction.
         desired_luma = original_luma + (rendered_luma - original_luma) * (
-            1 - 0.28 * naturalness
+            1 - 0.16 * naturalness
         )
         current_luma = _luma(rendered)
         luma_ratio = np.divide(
@@ -404,6 +405,11 @@ class RetouchEngine:
         if plan.highlights.warmth or plan.shadows.warmth or plan.shadows.tint:
             applied.append("split tonal warmth")
 
+        # Build foreground and background variants from the same base, then combine
+        # their deltas once. Sequential masked operations apply both edits to soft
+        # boundary pixels and can manufacture an outline even with a good matte.
+        local_base = result
+        local_delta = np.zeros_like(result)
         for name, adjustment, mask in (
             ("subject", plan.subject, masks.subject),
             ("background", plan.background, masks.background),
@@ -413,15 +419,17 @@ class RetouchEngine:
             if masks.confidence[name] < 0.45:
                 skipped.append(f"{name}: confidence below safe threshold")
                 continue
-            result = _local_adjust(
-                result,
-                mask,
+            adjusted = _local_adjust(
+                local_base,
+                np.ones_like(mask),
                 adjustment.exposure_ev,
                 adjustment.contrast,
                 adjustment.saturation,
                 adjustment.warmth,
             )
+            local_delta += (adjusted - local_base) * mask[..., None]
             applied.append(f"masked {name} adjustment")
+        result = np.clip(local_base + local_delta, 0, 1)
 
         if plan.sky.enabled:
             if masks.confidence["sky"] >= 0.45:
