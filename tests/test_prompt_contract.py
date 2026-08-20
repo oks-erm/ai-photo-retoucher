@@ -62,6 +62,8 @@ def test_lua_bridge_uses_full_resolution_local_render() -> None:
     assert '" " .. options .. " --core' not in text
     assert "dt.database.import" in text
     assert "pcall(dt.gui.action" not in text
+    assert "REQUIRED_RENDERER_VERSION" in text
+    assert "Backend is missing or outdated" in text
 
 
 def test_lua_bridge_is_one_click_and_renders_its_own_preview() -> None:
@@ -93,3 +95,5 @@ def test_macos_installer_registers_plugin_and_backend() -> None:
     assert 'require "ai_retoucher"' in text
     assert "LaunchAgents" in text
     assert "uv sync" in text
+    assert "birefnet-general-lite" in text
+    assert "EXPECTED_VERSION" in text
