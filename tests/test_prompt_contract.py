@@ -84,6 +84,8 @@ def test_lua_sliders_use_darktable_supported_bounds() -> None:
     assert "hard_max = 1" in text
     assert 'label = "Strength", min =' not in text
     assert 'label = "Naturalness", min =' not in text
+    assert ',"strength":%.3f,"naturalness":%.3f' in text
+    assert "strength.value, naturalness.value" in text
 
 
 def test_macos_installer_registers_plugin_and_backend() -> None:
