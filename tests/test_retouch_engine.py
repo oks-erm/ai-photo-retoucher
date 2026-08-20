@@ -3,9 +3,37 @@ from pathlib import Path
 import numpy as np
 import tifffile
 
-from backend.retouch.engine import RetouchEngine
+from backend.retouch.engine import RetouchEngine, _apply_user_controls
 from backend.retouch.masks import MaskSet
 from backend.schemas import EditPlan
+
+
+def test_strength_is_an_exact_source_to_render_blend() -> None:
+    source = np.full((8, 12, 3), (0.2, 0.4, 0.6), np.float32)
+    rendered = np.full_like(source, (0.8, 0.6, 0.3))
+
+    zero = _apply_user_controls(source, rendered, strength=0, naturalness=0)
+    half = _apply_user_controls(source, rendered, strength=0.5, naturalness=0)
+    full = _apply_user_controls(source, rendered, strength=1, naturalness=0)
+
+    assert np.array_equal(zero, source)
+    assert np.allclose(half, (source + rendered) / 2)
+    assert np.array_equal(full, rendered)
+
+
+def test_naturalness_restores_source_colour_without_discarding_tone() -> None:
+    source = np.full((8, 12, 3), (0.25, 0.42, 0.62), np.float32)
+    rendered = np.full_like(source, (0.64, 0.38, 0.22))
+
+    expressive = _apply_user_controls(source, rendered, strength=1, naturalness=0)
+    natural = _apply_user_controls(source, rendered, strength=1, naturalness=1)
+
+    assert not np.allclose(expressive, natural)
+    source_ratio = source[..., 2].mean() / source[..., 0].mean()
+    expressive_ratio = expressive[..., 2].mean() / expressive[..., 0].mean()
+    natural_ratio = natural[..., 2].mean() / natural[..., 0].mean()
+    assert abs(natural_ratio - source_ratio) < abs(expressive_ratio - source_ratio)
+    assert not np.allclose(natural, source)
 
 
 def test_render_is_16_bit_editable_and_exports_masks(
