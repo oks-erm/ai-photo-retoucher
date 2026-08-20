@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from backend.retouch.engine import RetouchEngine
+from backend.retouch.engine import RetouchEngine, _apply_user_controls
 from backend.retouch.masks import MaskSet
 from backend.retouch.style import (
     RegionMetrics,
@@ -143,7 +143,9 @@ def test_named_presets_render_distinct_pixels(plan: EditPlan, monkeypatch) -> No
             maximum_passes=2,
         )
         rendered, _, _ = engine.render_pixels(rgb, masks, refinement.plan, style=style)
-        outputs.append(rendered)
+        outputs.append(
+            _apply_user_controls(rgb, rendered, strength=1, naturalness=0.85)
+        )
 
     pairwise_differences = [
         float(np.mean(np.abs(left - right)))
